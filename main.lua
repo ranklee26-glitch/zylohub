@@ -1,10 +1,13 @@
 -- =========================================================================
---  ZYLOHUB UI FRAMEWORK (v3.5 - RAYCAST GROUND & MULTI-REMOTE EGG FIX)
+--  ZYLOHUB UI FRAMEWORK (v3.5 - RED LINE COLUMN ALIGNMENT & CONTINUOUS PLACER)
 --  Theme: Deep Obsidian Black (#070912) & Cosmic Purple (#8A2BE2)
---  Fixes:
---   1. Real Surface Raycast: Menghitung ketinggian tanah Y persis di atas permukaan bedeng.
---   2. In-Farm Guaranteed: 3.0 studs ke dalam batas pagar lahan (Zero "Out of farm" errors).
---   3. Multi-Remote & Tool Activation Engine.
+--  Patokan Garis Merah Sesuai Gambar:
+--   - "Left": Baris garis merah di bedeng sebelah kiri.
+--   - "Right": Baris garis merah di bedeng sebelah kanan.
+--   - "Good Position": 2 Baris garis merah di sisi dalam (dekat jalan tengah).
+--   - "All": Ke-4 jalur garis merah penuh teratur.
+--   - Fixed Ketinggian Y = 0.135 (Resmi server game yang terbukti menaruh telur).
+--   - Continuous Loop: Terus menaruh semua telur sampai habis / capai target Max.
 -- =========================================================================
 
 local Players = game:GetService("Players")
@@ -16,26 +19,24 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
 -- =========================================================================
--- [1] SERVICES & REMOTES
+-- [1] SERVICES & REMOTES (KEMBALI KE REMOTES ASLI YANG BEKERJA)
 -- =========================================================================
 local GameEvents = ReplicatedStorage:WaitForChild("GameEvents", 10)
 local Plant_RE = GameEvents and GameEvents:WaitForChild("Plant_RE", 5)
 local Sell_Inventory = GameEvents and GameEvents:WaitForChild("Sell_Inventory", 5)
 local BuySeedStock = GameEvents and GameEvents:WaitForChild("BuySeedStock", 5)
 
--- Cari semua kemungkinan remote telur di ReplicatedStorage
-local EggPlaceRemote = nil
-if GameEvents then
-    EggPlaceRemote = GameEvents:FindFirstChild("PlaceEgg") 
-        or GameEvents:FindFirstChild("Place_Egg") 
-        or GameEvents:FindFirstChild("Egg_RE") 
-        or GameEvents:FindFirstChild("EggPlace")
-        or GameEvents:FindFirstChild("Place_RE")
-end
+local EggPlaceRemote = GameEvents and (
+    GameEvents:FindFirstChild("PlaceEgg") or
+    GameEvents:FindFirstChild("Place_Egg") or
+    GameEvents:FindFirstChild("Egg_RE") or
+    GameEvents:FindFirstChild("Place_RE")
+)
 
 local Farms = workspace:WaitForChild("Farm", 10)
 
 local State = {
+    -- Farm State (Locked)
     AutoPlant = false,
     PlantMode = "UnderPlayer",
     AutoHarvest = false,
@@ -44,12 +45,14 @@ local State = {
     SearchSeedQuery = "",
     SellThreshold = 15,
     
+    -- Pets State
     SelectedEgg = "All Eggs",
-    PlacePosition = "Good Position",
+    PlacePosition = "Good Position", -- "Good Position", "Right", "Left", "All"
     AutoPlaceEgg = false,
     MaxEggPlace = 0,
     FarmEggCount = 0,
     
+    -- Other Pets
     AutoHatch = false,
     PetMinigames = false,
     AutoPickUpPet = false,
@@ -58,6 +61,7 @@ local State = {
     AutoElephant = false,
     AutoPetBoost = false,
     
+    -- Misc
     Walkspeed = false,
     InfJump = false,
     Noclip = false,
@@ -337,7 +341,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -- =========================================================================
--- [5] PET ENGINE: RAYCAST SURFACE DETECTOR & IN-FARM VALIDATOR
+-- [5] PET ENGINE: EXACT FILTER & RED LINE ACCURATE GRID
 -- =========================================================================
 local function isPureEgg(tool: Tool): boolean
     if not tool:IsA("Tool") then return false end
@@ -372,6 +376,7 @@ local function GetPureEggsInBackpack()
     return eggs
 end
 
+-- Memindai telur yang sudah duduk di kebun
 local function GetPlacedEggsInFarm(): table
     local placed = {}
     local farm = GetFarm()
@@ -421,7 +426,7 @@ local function GetPlacedEggsInFarm(): table
     return placed
 end
 
--- Radius aman anti-tumpuk: 2.3 studs
+-- Deteksi tumpuk (Radius 2.2 studs)
 local function IsSpotOccupied(pos: Vector3, minDistance: number, placedCache: table): boolean
     local distSq = minDistance * minDistance
 
@@ -447,26 +452,9 @@ local function IsSpotOccupied(pos: Vector3, minDistance: number, placedCache: ta
     return false
 end
 
--- Raycast untuk mendapatkan ketinggian tanah persis di atas permukaan part bedeng
-local function GetAccurateGroundPos(worldX: number, worldZ: number, fallbackY: number): Vector3
-    local rayOrigin = Vector3.new(worldX, fallbackY + 15, worldZ)
-    local rayDirection = Vector3.new(0, -30, 0)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Include
-    
-    local farm = GetFarm()
-    if farm then
-        params.FilterDescendantsInstances = { farm }
-        local result = workspace:Raycast(rayOrigin, rayDirection, params)
-        if result and result.Position then
-            -- Letakkan tepat di atas permukaan (offset +0.2 stud)
-            return Vector3.new(worldX, result.Position.Y + 0.2, worldZ)
-        end
-    end
-    return Vector3.new(worldX, fallbackY, worldZ)
-end
-
--- Generator Grid: 100% DI DALAM KEBUN (INSET MARGIN 2.8 STUDS)
+-- =========================================================================
+-- [PUNCAK PENYESUAIAN]: SISTEM 4 GARIS MERAH SESUAI FOTO
+-- =========================================================================
 local function GenerateEggGrid(mode: string): table
     local points = {}
     local farm = GetFarm()
@@ -479,63 +467,113 @@ local function GenerateEggGrid(mode: string): table
     local farmLands = plantLocs:GetChildren()
     if #farmLands == 0 then return points end
 
-    -- Urutkan bedeng lahan
-    table.sort(farmLands, function(a, b)
-        local posA = a:IsA("BasePart") and a.Position or a:GetPivot().Position
-        local posB = b:IsA("BasePart") and b.Position or b:GetPivot().Position
-        if math.abs(posA.Z - posB.Z) > 1 then return posA.Z < posB.Z end
-        return posA.X < posB.X
-    end)
-
-    local SPACING = 2.6
-    local INSET_MARGIN = 2.8 -- Garansi 100% aman di dalam area bedeng
+    -- Pisahkan bedeng Kiri dan Kanan berdasarkan posisi X global
+    local leftLands = {}
+    local rightLands = {}
+    
+    -- Cari titik tengah X untuk membedakan bedeng kiri dan kanan
+    local totalX = 0
+    for _, land in ipairs(farmLands) do
+        local p = land:IsA("BasePart") and land.Position or land:GetPivot().Position
+        totalX = totalX + p.X
+    end
+    local midX = totalX / #farmLands
 
     for _, land in ipairs(farmLands) do
-        local baseLand = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
-        if baseLand then
-            local cf = baseLand.CFrame
-            local sz = baseLand.Size
-            local topY = (sz.Y / 2) + 0.2
+        local p = land:IsA("BasePart") and land.Position or land:GetPivot().Position
+        if p.X < midX then
+            table.insert(leftLands, land)
+        else
+            table.insert(rightLands, land)
+        end
+    end
 
-            local minX = -(sz.X / 2) + INSET_MARGIN
-            local maxX = (sz.X / 2) - INSET_MARGIN
-            local minZ = -(sz.Z / 2) + INSET_MARGIN
-            local maxZ = (sz.Z / 2) - INSET_MARGIN
+    -- Urutkan bedeng dari atas ke bawah (berdasarkan sumbu Z)
+    local function sortZ(a, b)
+        local posA = a:IsA("BasePart") and a.Position or a:GetPivot().Position
+        local posB = b:IsA("BasePart") and b.Position or b:GetPivot().Position
+        return posA.Z < posB.Z
+    end
+    table.sort(leftLands, sortZ)
+    table.sort(rightLands, sortZ)
 
-            if maxX > minX and maxZ > minZ then
-                if mode == "Good Position" or mode == "All" then
-                    for z = minZ, maxZ, SPACING do
-                        for x = minX, maxX, SPACING do
-                            local rawWorld = cf:PointToWorldSpace(Vector3.new(x, topY, z))
-                            local accuratePos = GetAccurateGroundPos(rawWorld.X, rawWorld.Z, rawWorld.Y)
-                            table.insert(points, accuratePos)
-                        end
-                    end
-                elseif mode == "Left" then
-                    for z = minZ, maxZ, SPACING do
-                        for x = minX, -1.0, SPACING do
-                            local rawWorld = cf:PointToWorldSpace(Vector3.new(x, topY, z))
-                            local accuratePos = GetAccurateGroundPos(rawWorld.X, rawWorld.Z, rawWorld.Y)
-                            table.insert(points, accuratePos)
-                        end
-                    end
-                elseif mode == "Right" then
-                    for z = minZ, maxZ, SPACING do
-                        for x = 1.0, maxX, SPACING do
-                            local rawWorld = cf:PointToWorldSpace(Vector3.new(x, topY, z))
-                            local accuratePos = GetAccurateGroundPos(rawWorld.X, rawWorld.Z, rawWorld.Y)
-                            table.insert(points, accuratePos)
-                        end
-                    end
-                end
+    local SPACING_Z = 2.45 -- Jarak antar telur per baris (rapat rapi sejajar)
+    local Y_POS = 0.135    -- Ketinggian mutlak yang 100% diterima server Plant_RE
+
+    -- Fungsi membuat baris pada sebuah lahan di offset X tertentu
+    local function makeLineOnLand(baseLand, localOffsetX)
+        local cf = baseLand.CFrame
+        local sz = baseLand.Size
+        local minZ = -(sz.Z / 2) + 1.8
+        local maxZ = (sz.Z / 2) - 1.8
+
+        for z = minZ, maxZ, SPACING_Z do
+            local worldPos = cf:PointToWorldSpace(Vector3.new(localOffsetX, 0, z))
+            table.insert(points, Vector3.new(worldPos.X, Y_POS, worldPos.Z))
+        end
+    end
+
+    -- BEDENG KIRI:
+    -- Jalur Merah Luar Kiri = -sz.X/2 + 2.2
+    -- Jalur Merah Dalam Kiri = sz.X/2 - 2.2
+    -- BEDENG KANAN:
+    -- Jalur Merah Dalam Kanan = -sz.X/2 + 2.2
+    -- Jalur Merah Luar Kanan = sz.X/2 - 2.2
+
+    if mode == "Good Position" then
+        -- Dua garis merah bagian dalam (sebelah lorong tengah)
+        for _, land in ipairs(leftLands) do
+            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+            if b then makeLineOnLand(b, (b.Size.X / 2) - 2.2) end
+        end
+        for _, land in ipairs(rightLands) do
+            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+            if b then makeLineOnLand(b, -(b.Size.X / 2) + 2.2) end
+        end
+
+    elseif mode == "Left" then
+        -- Seluruh garis merah di kebun kiri (Luar dan Dalam kiri)
+        for _, land in ipairs(leftLands) do
+            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+            if b then
+                makeLineOnLand(b, -(b.Size.X / 2) + 2.2)
+                makeLineOnLand(b, (b.Size.X / 2) - 2.2)
+            end
+        end
+
+    elseif mode == "Right" then
+        -- Seluruh garis merah di kebun kanan (Dalam dan Luar kanan)
+        for _, land in ipairs(rightLands) do
+            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+            if b then
+                makeLineOnLand(b, -(b.Size.X / 2) + 2.2)
+                makeLineOnLand(b, (b.Size.X / 2) - 2.2)
+            end
+        end
+
+    else -- "All"
+        -- Ke-4 jalur garis merah penuh
+        for _, land in ipairs(leftLands) do
+            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+            if b then
+                makeLineOnLand(b, -(b.Size.X / 2) + 2.2)
+                makeLineOnLand(b, (b.Size.X / 2) - 2.2)
+            end
+        end
+        for _, land in ipairs(rightLands) do
+            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+            if b then
+                makeLineOnLand(b, -(b.Size.X / 2) + 2.2)
+                makeLineOnLand(b, (b.Size.X / 2) - 2.2)
             end
         end
     end
+
     return points
 end
 
 -- =========================================================================
--- [WORKER MULTI-REMOTE AUTO PLACE EGG]
+-- [WORKER CONTINUOUS AUTO PLACE EGG]
 -- =========================================================================
 task.spawn(function()
     while true do
@@ -551,6 +589,7 @@ task.spawn(function()
                     local allGridPoints = GenerateEggGrid(State.PlacePosition)
                     local currentCache = GetPlacedEggsInFarm()
 
+                    -- Cari tool telur yang sesuai
                     local activeTool = nil
                     for _, tool in ipairs(eggs) do
                         local cTitle = cleanEggTitle(tool.Name)
@@ -563,7 +602,7 @@ task.spawn(function()
                     if activeTool then
                         local targetPos = nil
                         for _, pt in ipairs(allGridPoints) do
-                            if not IsSpotOccupied(pt, 2.3, currentCache) then
+                            if not IsSpotOccupied(pt, 2.2, currentCache) then
                                 targetPos = pt
                                 break
                             end
@@ -576,16 +615,14 @@ task.spawn(function()
                             local eggPlantName = activeTool:FindFirstChild("Plant_Name")
                             local seedParam = (eggPlantName and tostring(eggPlantName.Value) ~= "") and tostring(eggPlantName.Value) or cTitle
 
-                            -- Multi-Remote Firing
-                            if EggPlaceRemote then
-                                pcall(function() EggPlaceRemote:FireServer(targetPos, cTitle) end)
-                                pcall(function() EggPlaceRemote:FireServer(cTitle, targetPos) end)
-                            end
+                            -- Menembakkan Remote asli game yang terbukti menaruh telur
                             if Plant_RE then
-                                pcall(function() Plant_RE:FireServer(targetPos, seedParam) end)
+                                Plant_RE:FireServer(targetPos, seedParam)
+                            end
+                            if EggPlaceRemote then
+                                EggPlaceRemote:FireServer(targetPos, cTitle)
                             end
 
-                            -- Aktivasi tool langsung di tangan
                             pcall(function()
                                 if activeTool and activeTool:IsA("Tool") then
                                     activeTool:Activate()
@@ -593,18 +630,18 @@ task.spawn(function()
                             end)
 
                             State.FarmEggCount = State.FarmEggCount + 1
-                            task.wait(0.25)
+                            task.wait(0.22)
                         else
-                            task.wait(0.5)
+                            task.wait(0.4)
                         end
                     else
-                        task.wait(0.5)
+                        task.wait(0.4)
                     end
                 else
-                    task.wait(0.5)
+                    task.wait(0.4)
                 end
             else
-                task.wait(0.5)
+                task.wait(0.4)
             end
         else
             task.wait(0.3)
@@ -648,7 +685,7 @@ local C_TEXT_M   = Color3.fromRGB(145, 155, 185)
 
 local CoreGui = game:GetService("CoreGui")
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ZyloHub_v3_5_RaycastFixed"
+ScreenGui.Name = "ZyloHub_v3_5_RedLineGrid"
 ScreenGui.ResetOnSpawn = false
 
 if syn and syn.protect_gui then
@@ -1641,4 +1678,4 @@ Buttons["Pets"].BackgroundColor3 = C_PURPLE
 Buttons["Pets"].TextColor3 = Color3.fromRGB(255, 255, 255)
 PagePets.Visible = true
 
-print("[ZyloHub v3.5] Raycast Ground & Safe Inset Active!")
+print("[ZyloHub v3.5] Red Line Lane Alignment Active!")

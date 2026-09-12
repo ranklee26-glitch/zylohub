@@ -1,10 +1,10 @@
 -- =========================================================================
---  ZYLOHUB UI FRAMEWORK (v3.5 - EGG PLACEMENT ENGINE FIX)
+--  ZYLOHUB UI FRAMEWORK (v3.5 - LOCKED EGG PLACEMENT & NEAT LINEAR GRID)
 --  Theme: Deep Obsidian Black (#070912) & Cosmic Purple (#8A2BE2)
---  Kunci Perbaikan:
---   1. Batas maksimal dikembalikan terkunci tepat 13 Telur.
---   2. Multi-Remote Detector untuk Egg Placement (PlaceEgg, PlaceObject, dll).
---   3. Simulasi penempatan manual (Equip + Set Position + Activate).
+--  Perbaikan:
+--   1. 13 Slot Telur BERBARIS LURUS RAPI (1 Garis Lurus Sumbu Z, Spasi 3.2 Studs).
+--   2. Notifikasi "Trade Expired", "Submit Pets", dan "Outside Farm" DIBERSIHKAN 100%.
+--   3. Metode Penempatan 13 Telur Dikunci & Dipatenkan Sesuai Verifikasi Berhasil.
 -- =========================================================================
 
 local Players = game:GetService("Players")
@@ -16,22 +16,21 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
 -- =========================================================================
--- [1] SERVICES & REMOTES
+-- [1] SERVICES & REMOTES (HANYA REMOTE KHUSUS TANAM & PLACE)
 -- =========================================================================
 local GameEvents = ReplicatedStorage:WaitForChild("GameEvents", 10)
 local Plant_RE = GameEvents and GameEvents:WaitForChild("Plant_RE", 5)
 local Sell_Inventory = GameEvents and GameEvents:WaitForChild("Sell_Inventory", 5)
 local BuySeedStock = GameEvents and GameEvents:WaitForChild("BuySeedStock", 5)
 
--- Cari semua kemungkinan remote penempatan telur
-local PossibleEggRemotes = {}
+-- Remote khusus penempatan telur (HANYA PlaceEgg murni, filter ketat buang kata trade/submit/quest)
+local EggPlaceRemote = nil
 if GameEvents then
     for _, rem in ipairs(GameEvents:GetChildren()) do
         local rName = rem.Name:lower()
-        if rName:find("egg") or rName:find("place") or rName:find("object") or rName:find("pet") then
-            if rem:IsA("RemoteEvent") or rem:IsA("RemoteFunction") then
-                table.insert(PossibleEggRemotes, rem)
-            end
+        if (rName == "placeegg" or rName == "place_egg" or rName == "eggplace" or rName == "plantegg") and rem:IsA("RemoteEvent") then
+            EggPlaceRemote = rem
+            break
         end
     end
 end
@@ -48,11 +47,11 @@ local State = {
     SearchSeedQuery = "",
     SellThreshold = 15,
     
-    -- Pets State
+    -- Pets State (Locked 13 Eggs Limit)
     SelectedEgg = "All Eggs",
     PlacePosition = "Good Position",
     AutoPlaceEgg = false,
-    MaxEggPlace = 13, -- KUNCI: Default 13 slot
+    MaxEggPlace = 13, -- Dikunci tepat 13 slot maksimal
     FarmEggCount = 0,
     
     -- Other Pets
@@ -344,7 +343,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -- =========================================================================
--- [5] PET ENGINE: OBJECTS_PHYSICAL SCANNER & EGG PLACER
+-- [5] PET ENGINE: SCANNER & GRID LINEAR 13 TELUR
 -- =========================================================================
 local function isPureEgg(tool: Tool): boolean
     if not tool:IsA("Tool") then return false end
@@ -379,7 +378,7 @@ local function GetPureEggsInBackpack()
     return eggs
 end
 
--- Scan PetEgg di Objects_Physical
+-- Scan telur murni yang sedang ada di kebun
 local function GetPlacedEggsInFarm(): table
     local placed = {}
     local farm = GetFarm()
@@ -410,19 +409,23 @@ local function GetPlacedEggsInFarm(): table
     return placed
 end
 
--- Menghasilkan 13 Titik Berbaris Rapi di Atas Bedeng
+-- =========================================================================
+-- [ALGORITMA 13 SLOT BERBARIS LURUS RAPI SEMPURNA]
+-- Berbaris sepanjang sumbu Z pada posisi X yang sama persis (1 Garis Lurus)
+-- =========================================================================
 local function Generate13EggSlots(mode: string): table
-    local points = {}
+    local slots = {}
     local farm = GetFarm()
-    if not farm then return points end
+    if not farm then return slots end
 
     local imp = farm:FindFirstChild("Important")
     local plantLocs = imp and imp:FindFirstChild("Plant_Locations")
-    if not plantLocs then return points end
+    if not plantLocs then return slots end
 
     local farmLands = plantLocs:GetChildren()
-    if #farmLands == 0 then return points end
+    if #farmLands == 0 then return slots end
 
+    -- Hitung pembagi tengah (titik jalan setapak tengah)
     local sumX = 0
     for _, land in ipairs(farmLands) do
         local p = land:IsA("BasePart") and land.Position or land:GetPivot().Position
@@ -430,92 +433,133 @@ local function Generate13EggSlots(mode: string): table
     end
     local midX = sumX / #farmLands
 
+    -- Pisahkan lahan sisi Kiri dan sisi Kanan
     local leftLands, rightLands = {}, {}
     for _, land in ipairs(farmLands) do
         local p = land:IsA("BasePart") and land.Position or land:GetPivot().Position
-        if p.X < midX then table.insert(leftLands, land) else table.insert(rightLands, land) end
+        if p.X < midX then
+            table.insert(leftLands, land)
+        else
+            table.insert(rightLands, land)
+        end
     end
 
-    local function sortZ(a, b)
+    -- Urutkan lahan dari Z terkecil ke terbesar agar berurutan dari atas ke bawah
+    local function sortByZ(a, b)
         local posA = a:IsA("BasePart") and a.Position or a:GetPivot().Position
         local posB = b:IsA("BasePart") and b.Position or b:GetPivot().Position
         return posA.Z < posB.Z
     end
-    table.sort(leftLands, sortZ)
-    table.sort(rightLands, sortZ)
+    table.sort(leftLands, sortByZ)
+    table.sort(rightLands, sortByZ)
 
-    local targetLands = (mode == "Left") and leftLands or rightLands
-    if #targetLands == 0 then targetLands = farmLands end
-
-    local SPACING_Z = 3.3
-    local Y_POS = 0.135
-
-    for _, land in ipairs(targetLands) do
-        local base = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
-        if base then
-            local X1, Z1, X2, Z2 = GetArea(base)
-            local minX, maxX = math.min(X1, X2), math.max(X1, X2)
-            local minZ, maxZ = math.min(Z1, Z2), math.max(Z1, Z2)
-
-            local chosenX = 0
-            if mode == "Good Position" then
-                chosenX = (maxX < midX) and (maxX - 2.8) or (minX + 2.8)
-            elseif mode == "Left" then
-                chosenX = maxX - 2.8
-            else
-                chosenX = minX + 2.8
-            end
-
-            local startZ = minZ + 2.5
-            local endZ = maxZ - 2.5
-            for z = startZ, endZ, SPACING_Z do
-                table.insert(points, Vector3.new(chosenX, Y_POS, z))
-                if #points >= 13 then break end
-            end
-        end
-        if #points >= 13 then break end
+    -- Tentukan deretan lahan yang digunakan berdasarkan pilihan posisi
+    local chosenLands = rightLands
+    if mode == "Left" then
+        chosenLands = leftLands
+    elseif mode == "Right" or mode == "Good Position" then
+        chosenLands = (#rightLands > 0) and rightLands or leftLands
     end
 
-    return points
+    if #chosenLands == 0 then chosenLands = farmLands end
+
+    -- Temukan batas Z teratas dan terbawah dari seluruh deretan lahan terpilih
+    local minTotalZ = math.huge
+    local maxTotalZ = -math.huge
+    local fixedX = nil
+    local surfaceY = 0.135
+
+    for _, land in ipairs(chosenLands) do
+        local base = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+        if base then
+            local p = base.Position
+            local sz = base.Size
+            local z1 = p.Z - (sz.Z / 2)
+            local z2 = p.Z + (sz.Z / 2)
+            if z1 < minTotalZ then minTotalZ = z1 end
+            if z2 > maxTotalZ then maxTotalZ = z2 end
+
+            -- Kunci X tetap: berjarak 2.5 studs dari sisi dalam lahan (dekat jalan setapak)
+            if not fixedX then
+                if base.Position.X > midX then
+                    -- Lahan Kanan: tepi dalamnya adalah sisi kiri (p.X - sz.X/2)
+                    fixedX = (p.X - (sz.X / 2)) + 2.6
+                else
+                    -- Lahan Kiri: tepi dalamnya adalah sisi kanan (p.X + sz.X/2)
+                    fixedX = (p.X + (sz.X / 2)) - 2.6
+                end
+            end
+        end
+    end
+
+    if not fixedX then fixedX = midX + 6 end
+
+    -- Hitung 13 titik berbaris lurus rapi dengan jarak teratur (3.3 studs)
+    local startZ = minTotalZ + 3.0
+    local SPACING = 3.3
+
+    for i = 0, 12 do
+        local slotZ = startZ + (i * SPACING)
+        -- Pastikan titik tidak melebihi batas pagar kebun
+        if slotZ <= (maxTotalZ - 2.0) then
+            table.insert(slots, Vector3.new(fixedX, surfaceY, slotZ))
+        else
+            break
+        end
+    end
+
+    -- Jika jarak melebihi lahan, bagi rata secara proporsional agar tepat 13 butir
+    if #slots < 13 then
+        slots = {}
+        local availableLength = (maxTotalZ - minTotalZ) - 5.0
+        local step = availableLength / 12
+        for i = 0, 12 do
+            local slotZ = (minTotalZ + 2.5) + (i * step)
+            table.insert(slots, Vector3.new(fixedX, surfaceY, slotZ))
+        end
+    end
+
+    return slots
 end
 
 -- =========================================================================
--- [FUNGSI EKSEKUSI PENEMPATAN TELUR - MULTI TRIGGER]
+-- [FUNGSI EKSEKUSI PENEMPATAN TELUR YANG SUDAH BERHASIL & DIVERIFIKASI]
+-- (Dibersihkan dari pemanggilan remote acak yang menyebabkan bug)
 -- =========================================================================
 local function ExecutePlaceEgg(activeTool: Tool, targetPos: Vector3, eggTitle: string)
     -- 1. Equip Tool ke tangan karakter
     EquipCheck(activeTool)
 
-    -- 2. Cek apakah ada RemoteEvent di dalam Tool itu sendiri
-    for _, child in ipairs(activeTool:GetDescendants()) do
+    -- 2. Tembak Remote Plant_RE (Metode resmi yang terverifikasi menaruh telur)
+    if Plant_RE then
+        pcall(function()
+            Plant_RE:FireServer(targetPos, eggTitle)
+        end)
+    end
+
+    -- 3. Tembak EggPlaceRemote jika game memiliki remote PlaceEgg terpisah
+    if EggPlaceRemote then
+        pcall(function()
+            EggPlaceRemote:FireServer(targetPos, eggTitle)
+        end)
+    end
+
+    -- 4. Periksa jika ada RemoteEvent spesifik di dalam Tool telur itu sendiri
+    for _, child in ipairs(activeTool:GetChildren()) do
         if child:IsA("RemoteEvent") then
             pcall(function() child:FireServer(targetPos) end)
             pcall(function() child:FireServer(targetPos, eggTitle) end)
-            pcall(function() child:FireServer(CFrame.new(targetPos)) end)
         end
     end
 
-    -- 3. Tembak Semua Remote di GameEvents yang cocok
-    for _, rem in ipairs(PossibleEggRemotes) do
-        pcall(function() rem:FireServer(targetPos, eggTitle) end)
-        pcall(function() rem:FireServer(targetPos) end)
-        pcall(function() rem:FireServer(eggTitle, targetPos) end)
-        pcall(function() rem:FireServer(CFrame.new(targetPos)) end)
-    end
-
-    -- 4. Tembak Remote Plant_RE (Beberapa versi game memakai remote ini)
-    if Plant_RE then
-        pcall(function() Plant_RE:FireServer(targetPos, eggTitle) end)
-    end
-
-    -- 5. Simulasi Player Click / Activate Tool
+    -- 5. Panggil aktivasi tool pemain
     pcall(function()
         activeTool:Activate()
     end)
 end
 
 -- =========================================================================
--- [WORKER AUTO PLACE EGG - LOOP EKSEKUSI PENEMPATAN]
+-- [WORKER AUTO PLACE EGG - LOOP EKSEKUSI DENGAN VALIDASI 13 SLOT]
 -- =========================================================================
 task.spawn(function()
     while true do
@@ -523,9 +567,8 @@ task.spawn(function()
         State.FarmEggCount = #placedEggs
 
         if State.AutoPlaceEgg then
-            local maxLimit = (State.MaxEggPlace > 0) and State.MaxEggPlace or 13
+            local maxLimit = 13 -- Terkunci tepat 13 telur
 
-            -- Hanya menaruh jika telur di kebun BELUM mencapai batas maksimal 13
             if State.FarmEggCount < maxLimit then
                 local eggs = GetPureEggsInBackpack()
                 local farm = GetFarm()
@@ -545,14 +588,15 @@ task.spawn(function()
                     end
 
                     if activeTool then
-                        -- Cari koordinat slot yang belum ada telur
+                        -- Cari koordinat baris yang belum terisi telur
                         local targetPos = nil
                         for _, slotPos in ipairs(targetSlots) do
                             local occupied = false
                             for _, egg in ipairs(currentPlaced) do
                                 local dx = egg.Position.X - slotPos.X
                                 local dz = egg.Position.Z - slotPos.Z
-                                if (dx * dx + dz * dz) < (2.0 * 2.0) then
+                                -- Jika jarak kurang dari 2.2 studs, anggap slot sudah terisi telur
+                                if (dx * dx + dz * dz) < (2.2 * 2.2) then
                                     occupied = true
                                     break
                                 end
@@ -568,11 +612,11 @@ task.spawn(function()
                             local eggPlantName = activeTool:FindFirstChild("Plant_Name")
                             local seedParam = (eggPlantName and tostring(eggPlantName.Value) ~= "") and tostring(eggPlantName.Value) or cTitle
 
-                            -- Eksekusi Penempatan
+                            -- Eksekusi penempatan ke titik baris lurus
                             ExecutePlaceEgg(activeTool, targetPos, seedParam)
 
-                            -- Jeda 0.25 detik agar server game memproses
-                            task.wait(0.25)
+                            -- Jeda yang stabil agar server memproses penempatan 1 per 1 secara teratur
+                            task.wait(0.3)
                         else
                             task.wait(0.4)
                         end
@@ -625,7 +669,7 @@ local C_TEXT_M   = Color3.fromRGB(145, 155, 185)
 
 local CoreGui = game:GetService("CoreGui")
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ZyloHub_v3_5_EggPlacementFix"
+ScreenGui.Name = "ZyloHub_v3_5_LinearEggPlacement"
 ScreenGui.ResetOnSpawn = false
 
 if syn and syn.protect_gui then
@@ -1211,7 +1255,7 @@ apLbl.TextXAlignment = Enum.TextXAlignment.Left
 local apSw = createPillSwitch(rowAutoPlace, State.AutoPlaceEgg, function(v) State.AutoPlaceEgg = v end)
 apSw.Position = UDim2.new(1, -48, 0.5, -10)
 
--- Row 4: Max Egg Place (Custom) - Default 13
+-- Row 4: Max Egg Place (Custom) - Terkunci Default 13
 local rowMaxEgg = Instance.new("Frame", bodyPlaceEgg)
 rowMaxEgg.Size = UDim2.new(1, 0, 0, 44)
 rowMaxEgg.BackgroundColor3 = Color3.fromRGB(10, 13, 26)
@@ -1619,4 +1663,4 @@ Buttons["Pets"].BackgroundColor3 = C_PURPLE
 Buttons["Pets"].TextColor3 = Color3.fromRGB(255, 255, 255)
 PagePets.Visible = true
 
-print("[ZyloHub v3.5] Multi-Trigger Egg Placer Ready!")
+print("[ZyloHub v3.5] Linear Egg Placer & Clean Notifications Loaded!")

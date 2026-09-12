@@ -1,13 +1,10 @@
 -- =========================================================================
---  ZYLOHUB UI FRAMEWORK (v3.5 - RED LINE COLUMN ALIGNMENT & CONTINUOUS PLACER)
+--  ZYLOHUB UI FRAMEWORK (v3.5 - 13 EGGS ROW ALIGNMENT & STREAM PLACER)
 --  Theme: Deep Obsidian Black (#070912) & Cosmic Purple (#8A2BE2)
---  Patokan Garis Merah Sesuai Gambar:
---   - "Left": Baris garis merah di bedeng sebelah kiri.
---   - "Right": Baris garis merah di bedeng sebelah kanan.
---   - "Good Position": 2 Baris garis merah di sisi dalam (dekat jalan tengah).
---   - "All": Ke-4 jalur garis merah penuh teratur.
---   - Fixed Ketinggian Y = 0.135 (Resmi server game yang terbukti menaruh telur).
---   - Continuous Loop: Terus menaruh semua telur sampai habis / capai target Max.
+--  Kunci Perbaikan:
+--   1. Maksimal 13 Telur (Otomatis stop saat sudah 13 butir).
+--   2. Posisi baris & jarak (3.4 studs) persis seperti di foto screenshot.
+--   3. Loop kontinu: Menaruh ke-13 telur secara berurutan tanpa macet di butir ke-1.
 -- =========================================================================
 
 local Players = game:GetService("Players")
@@ -19,7 +16,7 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
 -- =========================================================================
--- [1] SERVICES & REMOTES (KEMBALI KE REMOTES ASLI YANG BEKERJA)
+-- [1] SERVICES & REMOTES
 -- =========================================================================
 local GameEvents = ReplicatedStorage:WaitForChild("GameEvents", 10)
 local Plant_RE = GameEvents and GameEvents:WaitForChild("Plant_RE", 5)
@@ -45,11 +42,11 @@ local State = {
     SearchSeedQuery = "",
     SellThreshold = 15,
     
-    -- Pets State
+    -- Pets State (Default Max 13 Egg)
     SelectedEgg = "All Eggs",
-    PlacePosition = "Good Position", -- "Good Position", "Right", "Left", "All"
+    PlacePosition = "Good Position",
     AutoPlaceEgg = false,
-    MaxEggPlace = 0,
+    MaxEggPlace = 13, -- Dikunci ke 13 butir sesuai permintaan Anda
     FarmEggCount = 0,
     
     -- Other Pets
@@ -341,7 +338,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -- =========================================================================
--- [5] PET ENGINE: EXACT FILTER & RED LINE ACCURATE GRID
+-- [5] PET ENGINE: DETEKTOR TELUR & PENGATURAN BARIS 13 SLOT
 -- =========================================================================
 local function isPureEgg(tool: Tool): boolean
     if not tool:IsA("Tool") then return false end
@@ -376,7 +373,7 @@ local function GetPureEggsInBackpack()
     return eggs
 end
 
--- Memindai telur yang sudah duduk di kebun
+-- Menghitung jumlah telur yang sudah berdiri di kebun
 local function GetPlacedEggsInFarm(): table
     local placed = {}
     local farm = GetFarm()
@@ -426,7 +423,7 @@ local function GetPlacedEggsInFarm(): table
     return placed
 end
 
--- Deteksi tumpuk (Radius 2.2 studs)
+-- Deteksi apakah titik sudah terisi telur/tanaman (radius aman 2.2 studs)
 local function IsSpotOccupied(pos: Vector3, minDistance: number, placedCache: table): boolean
     local distSq = minDistance * minDistance
 
@@ -453,9 +450,9 @@ local function IsSpotOccupied(pos: Vector3, minDistance: number, placedCache: ta
 end
 
 -- =========================================================================
--- [PUNCAK PENYESUAIAN]: SISTEM 4 GARIS MERAH SESUAI FOTO
+-- [PUNCAK BARISAN]: GENERATE 13 TITIK BERBARIS RAPI PERSIS SEPERTI FOTO
 -- =========================================================================
-local function GenerateEggGrid(mode: string): table
+local function Generate13EggRow(mode: string): table
     local points = {}
     local farm = GetFarm()
     if not farm then return points end
@@ -467,11 +464,7 @@ local function GenerateEggGrid(mode: string): table
     local farmLands = plantLocs:GetChildren()
     if #farmLands == 0 then return points end
 
-    -- Pisahkan bedeng Kiri dan Kanan berdasarkan posisi X global
-    local leftLands = {}
-    local rightLands = {}
-    
-    -- Cari titik tengah X untuk membedakan bedeng kiri dan kanan
+    -- Cari bedeng Kiri dan Kanan
     local totalX = 0
     for _, land in ipairs(farmLands) do
         local p = land:IsA("BasePart") and land.Position or land:GetPivot().Position
@@ -479,16 +472,12 @@ local function GenerateEggGrid(mode: string): table
     end
     local midX = totalX / #farmLands
 
+    local leftLands, rightLands = {}, {}
     for _, land in ipairs(farmLands) do
         local p = land:IsA("BasePart") and land.Position or land:GetPivot().Position
-        if p.X < midX then
-            table.insert(leftLands, land)
-        else
-            table.insert(rightLands, land)
-        end
+        if p.X < midX then table.insert(leftLands, land) else table.insert(rightLands, land) end
     end
 
-    -- Urutkan bedeng dari atas ke bawah (berdasarkan sumbu Z)
     local function sortZ(a, b)
         local posA = a:IsA("BasePart") and a.Position or a:GetPivot().Position
         local posB = b:IsA("BasePart") and b.Position or b:GetPivot().Position
@@ -497,83 +486,38 @@ local function GenerateEggGrid(mode: string): table
     table.sort(leftLands, sortZ)
     table.sort(rightLands, sortZ)
 
-    local SPACING_Z = 2.45 -- Jarak antar telur per baris (rapat rapi sejajar)
-    local Y_POS = 0.135    -- Ketinggian mutlak yang 100% diterima server Plant_RE
+    local targetLands = (mode == "Left") and leftLands or rightLands
+    if #targetLands == 0 then targetLands = farmLands end
 
-    -- Fungsi membuat baris pada sebuah lahan di offset X tertentu
-    local function makeLineOnLand(baseLand, localOffsetX)
-        local cf = baseLand.CFrame
-        local sz = baseLand.Size
-        local minZ = -(sz.Z / 2) + 1.8
-        local maxZ = (sz.Z / 2) - 1.8
+    local Y_POS = 0.135
+    local SPACING_Z = 3.4 -- Jarak antar telur persis seperti di foto (muat 13 telur per baris)
 
-        for z = minZ, maxZ, SPACING_Z do
-            local worldPos = cf:PointToWorldSpace(Vector3.new(localOffsetX, 0, z))
-            table.insert(points, Vector3.new(worldPos.X, Y_POS, worldPos.Z))
-        end
-    end
+    -- Buat barisan 13 titik di sisi dalam petak kebun (dekat pemain)
+    for _, land in ipairs(targetLands) do
+        local baseLand = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+        if baseLand then
+            local cf = baseLand.CFrame
+            local sz = baseLand.Size
+            
+            -- Posisi X sejajar tepi barisan telur seperti di screenshot
+            local localX = (mode == "Left") and (sz.X / 2 - 2.3) or (-sz.X / 2 + 2.3)
+            local minZ = -(sz.Z / 2) + 2.0
+            local maxZ = (sz.Z / 2) - 2.0
 
-    -- BEDENG KIRI:
-    -- Jalur Merah Luar Kiri = -sz.X/2 + 2.2
-    -- Jalur Merah Dalam Kiri = sz.X/2 - 2.2
-    -- BEDENG KANAN:
-    -- Jalur Merah Dalam Kanan = -sz.X/2 + 2.2
-    -- Jalur Merah Luar Kanan = sz.X/2 - 2.2
-
-    if mode == "Good Position" then
-        -- Dua garis merah bagian dalam (sebelah lorong tengah)
-        for _, land in ipairs(leftLands) do
-            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
-            if b then makeLineOnLand(b, (b.Size.X / 2) - 2.2) end
-        end
-        for _, land in ipairs(rightLands) do
-            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
-            if b then makeLineOnLand(b, -(b.Size.X / 2) + 2.2) end
-        end
-
-    elseif mode == "Left" then
-        -- Seluruh garis merah di kebun kiri (Luar dan Dalam kiri)
-        for _, land in ipairs(leftLands) do
-            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
-            if b then
-                makeLineOnLand(b, -(b.Size.X / 2) + 2.2)
-                makeLineOnLand(b, (b.Size.X / 2) - 2.2)
+            for z = minZ, maxZ, SPACING_Z do
+                local world = cf:PointToWorldSpace(Vector3.new(localX, 0, z))
+                table.insert(points, Vector3.new(world.X, Y_POS, world.Z))
+                if #points >= 13 then break end -- Maksimal 13 titik per baris
             end
         end
-
-    elseif mode == "Right" then
-        -- Seluruh garis merah di kebun kanan (Dalam dan Luar kanan)
-        for _, land in ipairs(rightLands) do
-            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
-            if b then
-                makeLineOnLand(b, -(b.Size.X / 2) + 2.2)
-                makeLineOnLand(b, (b.Size.X / 2) - 2.2)
-            end
-        end
-
-    else -- "All"
-        -- Ke-4 jalur garis merah penuh
-        for _, land in ipairs(leftLands) do
-            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
-            if b then
-                makeLineOnLand(b, -(b.Size.X / 2) + 2.2)
-                makeLineOnLand(b, (b.Size.X / 2) - 2.2)
-            end
-        end
-        for _, land in ipairs(rightLands) do
-            local b = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
-            if b then
-                makeLineOnLand(b, -(b.Size.X / 2) + 2.2)
-                makeLineOnLand(b, (b.Size.X / 2) - 2.2)
-            end
-        end
+        if #points >= 13 then break end
     end
 
     return points
 end
 
 -- =========================================================================
--- [WORKER CONTINUOUS AUTO PLACE EGG]
+-- [WORKER CONTINUOUS AUTO PLACE EGG - KUNCI 13 TELUR]
 -- =========================================================================
 task.spawn(function()
     while true do
@@ -581,12 +525,15 @@ task.spawn(function()
         State.FarmEggCount = #placedEggs
 
         if State.AutoPlaceEgg then
-            local eggs = GetPureEggsInBackpack()
-            local farm = GetFarm()
+            local maxLimit = (State.MaxEggPlace > 0) and State.MaxEggPlace or 13
 
-            if #eggs > 0 and farm then
-                if State.MaxEggPlace == 0 or State.FarmEggCount < State.MaxEggPlace then
-                    local allGridPoints = GenerateEggGrid(State.PlacePosition)
+            -- Hentikan penempatan jika sudah mencapai 13 butir telur!
+            if State.FarmEggCount < maxLimit then
+                local eggs = GetPureEggsInBackpack()
+                local farm = GetFarm()
+
+                if #eggs > 0 and farm then
+                    local targetPoints = Generate13EggRow(State.PlacePosition)
                     local currentCache = GetPlacedEggsInFarm()
 
                     -- Cari tool telur yang sesuai
@@ -600,8 +547,9 @@ task.spawn(function()
                     end
 
                     if activeTool then
+                        -- Cari titik baris yang masih kosong
                         local targetPos = nil
-                        for _, pt in ipairs(allGridPoints) do
+                        for _, pt in ipairs(targetPoints) do
                             if not IsSpotOccupied(pt, 2.2, currentCache) then
                                 targetPos = pt
                                 break
@@ -615,7 +563,7 @@ task.spawn(function()
                             local eggPlantName = activeTool:FindFirstChild("Plant_Name")
                             local seedParam = (eggPlantName and tostring(eggPlantName.Value) ~= "") and tostring(eggPlantName.Value) or cTitle
 
-                            -- Menembakkan Remote asli game yang terbukti menaruh telur
+                            -- Tembakkan remote yang valid
                             if Plant_RE then
                                 Plant_RE:FireServer(targetPos, seedParam)
                             end
@@ -630,18 +578,21 @@ task.spawn(function()
                             end)
 
                             State.FarmEggCount = State.FarmEggCount + 1
+                            -- Jeda 0.22 detik untuk menaruh butir berikutnya secara mulus
                             task.wait(0.22)
                         else
-                            task.wait(0.4)
+                            -- Semua 13 slot sudah terisi penuh
+                            task.wait(0.5)
                         end
                     else
-                        task.wait(0.4)
+                        task.wait(0.5)
                     end
                 else
-                    task.wait(0.4)
+                    task.wait(0.5)
                 end
             else
-                task.wait(0.4)
+                -- Sudah 13 telur, standby tenang tanpa spam
+                task.wait(0.5)
             end
         else
             task.wait(0.3)
@@ -685,7 +636,7 @@ local C_TEXT_M   = Color3.fromRGB(145, 155, 185)
 
 local CoreGui = game:GetService("CoreGui")
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ZyloHub_v3_5_RedLineGrid"
+ScreenGui.Name = "ZyloHub_v3_5_13EggsFixed"
 ScreenGui.ResetOnSpawn = false
 
 if syn and syn.protect_gui then
@@ -1242,7 +1193,7 @@ Instance.new("UICorner", spBtn).CornerRadius = UDim.new(0, 6)
 local spStroke = Instance.new("UIStroke", spBtn)
 spStroke.Color = Color3.fromRGB(45, 52, 80)
 
-local posOptions = { "Good Position", "Right", "Left", "All" }
+local posOptions = { "Good Position", "Right", "Left" }
 local posIndex = 1
 spBtn.MouseButton1Click:Connect(function()
     posIndex = posIndex + 1
@@ -1271,7 +1222,7 @@ apLbl.TextXAlignment = Enum.TextXAlignment.Left
 local apSw = createPillSwitch(rowAutoPlace, State.AutoPlaceEgg, function(v) State.AutoPlaceEgg = v end)
 apSw.Position = UDim2.new(1, -48, 0.5, -10)
 
--- Row 4: Max Egg Place (Custom)
+-- Row 4: Max Egg Place (Custom) - Default 13
 local rowMaxEgg = Instance.new("Frame", bodyPlaceEgg)
 rowMaxEgg.Size = UDim2.new(1, 0, 0, 44)
 rowMaxEgg.BackgroundColor3 = Color3.fromRGB(10, 13, 26)
@@ -1292,8 +1243,8 @@ local meSub = Instance.new("TextLabel", rowMaxEgg)
 meSub.Position = UDim2.new(0, 12, 0, 22)
 meSub.Size = UDim2.new(0.6, 0, 0, 14)
 meSub.BackgroundTransparency = 1
-meSub.Text = "Custom max egg place, 0 to default."
-meSub.TextColor3 = Color3.fromRGB(120, 130, 160)
+meSub.Text = "Maksimal 13 butir sesuai slot baris lahan."
+meSub.TextColor3 = Color3.fromRGB(120, 180, 255)
 meSub.Font = Enum.Font.GothamMedium
 meSub.TextSize = 8.5
 meSub.TextXAlignment = Enum.TextXAlignment.Left
@@ -1302,7 +1253,7 @@ local meBox = Instance.new("TextBox", rowMaxEgg)
 meBox.Position = UDim2.new(1, -165, 0.5, -13)
 meBox.Size = UDim2.new(0, 155, 0, 26)
 meBox.BackgroundColor3 = Color3.fromRGB(14, 17, 34)
-meBox.Text = "0"
+meBox.Text = "13"
 meBox.TextColor3 = Color3.fromRGB(245, 247, 255)
 meBox.Font = Enum.Font.GothamBold
 meBox.TextSize = 10
@@ -1319,9 +1270,9 @@ task.spawn(function()
     while true do
         if meSub and meSub.Parent then
             local count = State.FarmEggCount
-            local maxStr = (State.MaxEggPlace == 0) and "Default" or tostring(State.MaxEggPlace)
-            meSub.Text = "Di Kebun: " .. tostring(count) .. " telur • Max: " .. maxStr
-            meSub.TextColor3 = (State.MaxEggPlace > 0 and count >= State.MaxEggPlace) and Color3.fromRGB(255, 170, 70) or Color3.fromRGB(120, 180, 255)
+            local maxStr = tostring(State.MaxEggPlace)
+            meSub.Text = "Di Kebun: " .. tostring(count) .. " / " .. maxStr .. " telur (Max 13)"
+            meSub.TextColor3 = (count >= State.MaxEggPlace) and Color3.fromRGB(0, 255, 170) or Color3.fromRGB(120, 180, 255)
         end
         task.wait(1)
     end
@@ -1678,4 +1629,4 @@ Buttons["Pets"].BackgroundColor3 = C_PURPLE
 Buttons["Pets"].TextColor3 = Color3.fromRGB(255, 255, 255)
 PagePets.Visible = true
 
-print("[ZyloHub v3.5] Red Line Lane Alignment Active!")
+print("[ZyloHub v3.5] 13 Eggs Line Alignment Active!")

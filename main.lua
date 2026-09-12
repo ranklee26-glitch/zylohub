@@ -1,10 +1,10 @@
 -- =========================================================================
---  ZYLOHUB UI FRAMEWORK (v3.5 - VERIFIED Can_Plant DATASET EDITION)
+--  ZYLOHUB UI FRAMEWORK (v3.5 - OFFICIAL PetEggService EDITION)
 --  Theme: Deep Obsidian Black (#070912) & Cosmic Purple (#8A2BE2)
---  DATASET RESMI TERKONFIRMASI:
---   - Farm.Important.Data.Owner (Pemilik Lahan)
---   - Farm.Important.Plant_Locations -> Can_Plant (Objek Tanah Lahan Asli)
---   - Farm.Important.Objects_Physical -> PetEgg (Telur yang telah tertanam)
+--  VERIFIED FROM LOCAL DECOMPILE:
+--   Remote: ReplicatedStorage.GameEvents.PetEggService
+--   Method: FireServer("CreateEgg", targetPosition)
+--   Target Part: Farm.Important.Plant_Locations.Can_Plant
 -- =========================================================================
 
 local Players = game:GetService("Players")
@@ -16,12 +16,15 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
 -- =========================================================================
--- [1] SERVICES & REMOTES
+-- [1] SERVICES & REMOTES RESMI DARI DECOMPILE
 -- =========================================================================
 local GameEvents = ReplicatedStorage:WaitForChild("GameEvents", 10)
 local Plant_RE = GameEvents and GameEvents:WaitForChild("Plant_RE", 5)
 local Sell_Inventory = GameEvents and GameEvents:WaitForChild("Sell_Inventory", 5)
 local BuySeedStock = GameEvents and GameEvents:WaitForChild("BuySeedStock", 5)
+
+-- INI DIA REMOTE RESMI PENEMPATAN TELUR YANG DITEMUKAN DARI DECOMPILE!
+local PetEggService = GameEvents and GameEvents:WaitForChild("PetEggService", 5)
 
 local Farms = workspace:WaitForChild("Farm", 10)
 
@@ -71,7 +74,6 @@ local function GetFarm(): Folder?
     return nil
 end
 
--- Mengambil part Can_Plant asli dari kebun pemain
 local function GetCanPlantParts(): table
     local parts = {}
     local farm = GetFarm()
@@ -99,7 +101,6 @@ local function Generate13EggPositions(mode: string): table
     local canPlants = GetCanPlantParts()
     if #canPlants == 0 then return positions end
 
-    -- Urutkan Can_Plant (kiri dan kanan berdasarkan sumbu X)
     table.sort(canPlants, function(a, b)
         return a.Position.X < b.Position.X
     end)
@@ -119,11 +120,9 @@ local function Generate13EggPositions(mode: string): table
     for landIdx, land in ipairs(targetLands) do
         local cf = land.CFrame
         local size = land.Size
-        
-        -- Ketinggian permukaan atas tanah Can_Plant
         local topY = (size.Y / 2) + 0.15
 
-        -- Batas aman: masuk 1.8 studs dari tepi agar tidak kena pinggiran kayu
+        -- Batas aman 1.8 studs dari tepi part Can_Plant
         local safeX = (size.X / 2) - 1.8
         local safeZ = (size.Z / 2) - 1.8
 
@@ -134,12 +133,10 @@ local function Generate13EggPositions(mode: string): table
 
         if countForThis > 0 then
             local zStep = (safeZ * 2) / (countForThis + 1)
-            -- Letakkan di sepanjang garis tepi dalam yang rapi
             local localX = (landIdx == 1) and (safeX - 0.5) or (-safeX + 0.5)
             
             for i = 1, countForThis do
                 local localZ = -safeZ + (i * zStep)
-                -- Rumus matematika CFrame resmi: Mengubah koordinat lokal Can_Plant ke World Space
                 local worldPoint = cf:PointToWorldSpace(Vector3.new(localX, topY, localZ))
                 table.insert(positions, worldPoint)
                 if #positions >= 13 then break end
@@ -153,7 +150,7 @@ local function Generate13EggPositions(mode: string): table
 end
 
 -- =========================================================================
--- [4] SCANNER TELUR TERPASANG DI Objects_Physical
+-- [4] SCANNER TELUR DI Objects_Physical
 -- =========================================================================
 local function GetPlacedEggsInFarm(): table
     local placed = {}
@@ -265,7 +262,7 @@ local function isPureEgg(tool: Tool): boolean
     if tool:FindFirstChild("Item_String") then return false end
     if nameLower:find("eggfruit") or nameLower:find("eggplant") then return false end
     for _, kw in ipairs(BLACKLISTED_KEYWORDS) do if nameLower:find(kw) then return false end end
-    return tool:FindFirstChild("EggData") or nameLower:find("egg")
+    return tool:FindFirstChild("PetEggToolLocal") or tool:FindFirstChild("EggData") or nameLower:find("egg")
 end
 
 local function cleanEggTitle(rawName: string): string
@@ -299,7 +296,7 @@ local function EquipCheck(Tool: Tool)
 end
 
 -- =========================================================================
--- [6] LOOP WORKER AUTO PLACE EGG (AKURAT 100% CAN_PLANT)
+-- [6] LOOP WORKER AUTO PLACE EGG (MENGGUNAKAN PetEggService RESMI)
 -- =========================================================================
 local isPlacingEgg = false
 
@@ -315,11 +312,10 @@ task.spawn(function()
                 local eggs = GetPureEggsInBackpack()
                 local canPlants = GetCanPlantParts()
 
-                if #eggs > 0 and #canPlants > 0 then
+                if #eggs > 0 and #canPlants > 0 and PetEggService then
                     local targetSlots = Generate13EggPositions(State.PlacePosition)
                     local currentPlaced = GetPlacedEggsInFarm()
 
-                    -- Cari tool telur yang dipilih pemain
                     local activeTool = nil
                     for _, tool in ipairs(eggs) do
                         local cTitle = cleanEggTitle(tool.Name)
@@ -330,7 +326,6 @@ task.spawn(function()
                     end
 
                     if activeTool then
-                        -- Cari koordinat slot yang belum terisi telur
                         local targetPos = nil
                         for _, slotPos in ipairs(targetSlots) do
                             local occupied = false
@@ -352,17 +347,11 @@ task.spawn(function()
                             isPlacingEgg = true
                             EquipCheck(activeTool)
 
-                            local cTitle = cleanEggTitle(activeTool.Name)
-                            local eggPlantName = activeTool:FindFirstChild("Plant_Name")
-                            local seedParam = (eggPlantName and tostring(eggPlantName.Value) ~= "") and tostring(eggPlantName.Value) or cTitle
+                            -- TEMBAK REMOTE RESMI PERSIS SEPERTI DI PetEggToolLocal!
+                            -- v_u_10:FireServer("CreateEgg", targetPos)
+                            PetEggService:FireServer("CreateEgg", targetPos)
 
-                            -- Tembak Remote Plant_RE ke koordinat Can_Plant yang sah
-                            if Plant_RE then
-                                Plant_RE:FireServer(targetPos, seedParam)
-                            end
-                            pcall(function() activeTool:Activate() end)
-
-                            -- Jeda stabil agar game mendaftarkan telur ke Objects_Physical
+                            -- Jeda stabil 0.4 detik (sesuai cooldown asli script game: task.delay(0.4))
                             task.wait(0.4)
                             isPlacingEgg = false
                         else
@@ -558,7 +547,7 @@ local C_TEXT_M   = Color3.fromRGB(145, 155, 185)
 
 local CoreGui = game:GetService("CoreGui")
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ZyloHub_v3_5_CanPlant"
+ScreenGui.Name = "ZyloHub_v3_5_PetEggService"
 ScreenGui.ResetOnSpawn = false
 
 if syn and syn.protect_gui then
@@ -1193,7 +1182,7 @@ task.spawn(function()
         if meSub and meSub.Parent then
             local count = State.FarmEggCount
             local maxStr = tostring(State.MaxEggPlace)
-            meSub.Text = "Di Kebun: " .. tostring(count) .. " / " .. maxStr .. " telur (Can_Plant)"
+            meSub.Text = "Di Kebun: " .. tostring(count) .. " / " .. maxStr .. " telur (PetEggService Active)"
             meSub.TextColor3 = (count >= State.MaxEggPlace) and Color3.fromRGB(0, 255, 170) or Color3.fromRGB(120, 180, 255)
         end
         task.wait(0.3)
@@ -1551,4 +1540,4 @@ Buttons["Pets"].BackgroundColor3 = C_PURPLE
 Buttons["Pets"].TextColor3 = Color3.fromRGB(255, 255, 255)
 PagePets.Visible = true
 
-print("[ZyloHub v3.5] Can_Plant Dataset Edition Loaded!")
+print("[ZyloHub v3.5] Official PetEggService Edition Loaded & Verified!")

@@ -1,11 +1,10 @@
 -- =========================================================================
---  ZYLOHUB UI FRAMEWORK (v3.5 - 100% AUTOPLANT AREA FORMULA FOR EGGS)
+--  ZYLOHUB UI FRAMEWORK (v3.5 - UNIVERSAL EGG SCANNER & STREAM 13 SLOTS)
 --  Theme: Deep Obsidian Black (#070912) & Cosmic Purple (#8A2BE2)
---  Kunci Perbaikan:
---   1. 100% Memakai Formula AutoPlant yang Terbukti Sukses (GetArea bounding box).
---   2. Nol Error "You can only place this on your farm" karena murni di dalam part bedeng.
---   3. Menempatkan tepat 13 butir telur berbaris rapi (jarak 3.4 studs).
---   4. Mendukung opsi: "Good Position" (sisi dalam), "Left", dan "Right".
+--  Perbaikan:
+--   1. Scanner Telur Universal (Memindai semua model di dalam kebun tanpa terkecoh nama part).
+--   2. Stream Placer: Langsung mengisi Slot 1 s/d 13 berbaris rapi tanpa macet.
+--   3. Debug console F9 otomatis menampilkan struktur objek telur di kebun Anda.
 -- =========================================================================
 
 local Players = game:GetService("Players")
@@ -34,7 +33,6 @@ local EggPlaceRemote = GameEvents and (
 local Farms = workspace:WaitForChild("Farm", 10)
 
 local State = {
-    -- Farm State (Locked)
     AutoPlant = false,
     PlantMode = "UnderPlayer",
     AutoHarvest = false,
@@ -43,14 +41,12 @@ local State = {
     SearchSeedQuery = "",
     SellThreshold = 15,
     
-    -- Pets State
     SelectedEgg = "All Eggs",
     PlacePosition = "Good Position",
     AutoPlaceEgg = false,
-    MaxEggPlace = 13, -- Kunci 13 Telur
+    MaxEggPlace = 13,
     FarmEggCount = 0,
     
-    -- Other Pets
     AutoHatch = false,
     PetMinigames = false,
     AutoPickUpPet = false,
@@ -59,7 +55,6 @@ local State = {
     AutoElephant = false,
     AutoPetBoost = false,
     
-    -- Misc
     Walkspeed = false,
     InfJump = false,
     Noclip = false,
@@ -68,7 +63,7 @@ local State = {
 }
 
 -- =========================================================================
--- [2] STRICT SEED DETECTOR (LOCKED)
+-- [2] STRICT SEED DETECTOR
 -- =========================================================================
 local BLACKLISTED_KEYWORDS = {
     "shard", "pack", "bundle", "crate", "chest", "box", "gift", "present",
@@ -155,7 +150,7 @@ local function EquipCheck(Tool: Tool)
 end
 
 -- =========================================================================
--- [3] KERNEL AREA KEBUN (FORMULA RESMI AUTOPLANT)
+-- [3] KERNEL AREA KEBUN
 -- =========================================================================
 local function GetFarm(): Folder?
     if not Farms then return nil end
@@ -339,7 +334,7 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 -- =========================================================================
--- [5] PET ENGINE: AREA AUTOPLANT DITERAPKAN KE PENEMPATAN TELUR
+-- [5] PET ENGINE: UNIVERSAL DEEP SCANNER UNTUK TELUR DI KEBUN
 -- =========================================================================
 local function isPureEgg(tool: Tool): boolean
     if not tool:IsA("Tool") then return false end
@@ -374,83 +369,79 @@ local function GetPureEggsInBackpack()
     return eggs
 end
 
+-- Scanner Universal: Memindai semua descendant di dalam kebun
 local function GetPlacedEggsInFarm(): table
     local placed = {}
     local farm = GetFarm()
     if not farm then return placed end
 
-    local function checkAndAdd(item)
-        if not item or not (item:IsA("Model") or item:IsA("BasePart")) then return end
-        local nameLower = item.Name:lower()
-        if nameLower:find("eggplant") or nameLower:find("eggfruit") then return end
+    -- Ambil batas bounding box seluruh lahan pemain
+    local imp = farm:FindFirstChild("Important")
+    local plantLocs = imp and imp:FindFirstChild("Plant_Locations")
+    local farmLands = plantLocs and plantLocs:GetChildren() or {}
 
-        local isEgg = false
-        if nameLower:find("egg") or item:FindFirstChild("EggData") or item:GetAttribute("Egg") then
-            isEgg = true
-        else
-            local prompt = item:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if prompt then
-                local act, obj = prompt.ActionText:lower(), prompt.ObjectText:lower()
-                if (act:find("hatch") or act:find("claim") or act:find("egg") or obj:find("egg")) 
-                   and not (obj:find("eggplant") or obj:find("eggfruit")) then
-                    isEgg = true
+    local function isInsideFarmBounds(pos: Vector3): boolean
+        for _, land in ipairs(farmLands) do
+            local base = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
+            if base then
+                local X1, Z1, X2, Z2 = GetArea(base)
+                local minX, maxX = math.min(X1, X2) - 2, math.max(X1, X2) + 2
+                local minZ, maxZ = math.min(Z1, Z2) - 2, math.max(Z1, Z2) + 2
+                if pos.X >= minX and pos.X <= maxX and pos.Z >= minZ and pos.Z <= maxZ then
+                    return true
                 end
             end
         end
-
-        if isEgg then
-            local pos = item:IsA("BasePart") and item.Position or item:GetPivot().Position
-            table.insert(placed, { Instance = item, Position = pos })
-        end
+        return false
     end
 
-    local imp = farm:FindFirstChild("Important")
-    if imp then
-        local physical = imp:FindFirstChild("Plants_Physical")
-        if physical then for _, child in ipairs(physical:GetChildren()) do checkAndAdd(child) end end
-        for _, child in ipairs(imp:GetChildren()) do
-            if child.Name:lower():find("egg") and child ~= physical then
-                for _, sub in ipairs(child:GetChildren()) do checkAndAdd(sub) end
+    -- Pindai seluruh item di dalam Farm
+    for _, desc in ipairs(farm:GetDescendants()) do
+        if desc:IsA("Model") or desc:IsA("BasePart") then
+            local nLower = desc.Name:lower()
+            if not nLower:find("eggplant") and not nLower:find("eggfruit") then
+                local isEggCandidate = false
+                
+                -- Cek 1: Nama mengandung 'egg'
+                if nLower:find("egg") then
+                    isEggCandidate = true
+                -- Cek 2: ProximityPrompt dengan aksi hatch/claim/egg
+                else
+                    local prompt = desc:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt then
+                        local act = prompt.ActionText:lower()
+                        local obj = prompt.ObjectText:lower()
+                        if act:find("hatch") or act:find("claim") or act:find("egg") or obj:find("egg") then
+                            isEggCandidate = true
+                        end
+                    end
+                end
+
+                if isEggCandidate then
+                    local pos = desc:IsA("BasePart") and desc.Position or desc:GetPivot().Position
+                    if isInsideFarmBounds(pos) then
+                        -- Hindari duplikasi model vs part
+                        local alreadyAdded = false
+                        for _, p in ipairs(placed) do
+                            if (p.Position - pos).Magnitude < 1.0 then
+                                alreadyAdded = true
+                                break
+                            end
+                        end
+                        if not alreadyAdded then
+                            table.insert(placed, { Instance = desc, Position = pos })
+                        end
+                    end
+                end
             end
         end
     end
 
-    for _, child in ipairs(farm:GetChildren()) do
-        if child.Name:lower():find("egg") and child ~= imp then
-            for _, sub in ipairs(child:GetChildren()) do checkAndAdd(sub) end
-        end
-    end
     return placed
 end
 
--- Deteksi tumpukan (radius 2.2 studs)
-local function IsSpotOccupied(pos: Vector3, minDistance: number, placedCache: table): boolean
-    local distSq = minDistance * minDistance
-
-    for _, egg in ipairs(placedCache) do
-        local dx = egg.Position.X - pos.X
-        local dz = egg.Position.Z - pos.Z
-        if (dx * dx + dz * dz) < distSq then return true end
-    end
-
-    local farm = GetFarm()
-    local imp = farm and farm:FindFirstChild("Important")
-    local physical = imp and imp:FindFirstChild("Plants_Physical")
-    if physical then
-        for _, plant in ipairs(physical:GetChildren()) do
-            local pPos = plant:IsA("BasePart") and plant.Position or (plant:IsA("Model") and plant:GetPivot().Position)
-            if pPos then
-                local dx = pPos.X - pos.X
-                local dz = pPos.Z - pos.Z
-                if (dx * dx + dz * dz) < distSq then return true end
-            end
-        end
-    end
-    return false
-end
-
 -- =========================================================================
--- [PUNCAK REVISI SESUAI SARAN ANDA]: MEMAKAI FORMULA GetArea(FarmLand)
+-- [PUNCAK BARIS 13 SLOT]: GENERATE 13 TITIK SEJAJAR DALAM BEDENG
 -- =========================================================================
 local function Generate13EggSlots(mode: string): table
     local points = {}
@@ -464,7 +455,7 @@ local function Generate13EggSlots(mode: string): table
     local farmLands = plantLocs:GetChildren()
     if #farmLands == 0 then return points end
 
-    -- Hitung titik tengah X untuk membedakan lahan kiri dan kanan
+    -- Pisahkan bedeng Kiri dan Kanan
     local sumX = 0
     for _, land in ipairs(farmLands) do
         local p = land:IsA("BasePart") and land.Position or land:GetPivot().Position
@@ -489,37 +480,31 @@ local function Generate13EggSlots(mode: string): table
     local targetLands = (mode == "Left") and leftLands or rightLands
     if #targetLands == 0 then targetLands = farmLands end
 
-    local SPACING_Z = 3.4 -- Jarak antar telur agar pas muat 13 butir
-    local Y_POS = 0.135    -- Ketinggian mutlak yang sama persis dengan AutoPlant
+    local SPACING_Z = 3.3
+    local Y_POS = 0.135
 
     for _, land in ipairs(targetLands) do
         local base = land:IsA("BasePart") and land or land:FindFirstChildOfClass("BasePart")
         if base then
-            -- MURNI MENGGUNAKAN FORMULA GetArea() MILIK AUTOPLANT!
             local X1, Z1, X2, Z2 = GetArea(base)
-            local minX = math.min(X1, X2)
-            local maxX = math.max(X1, X2)
-            local minZ = math.min(Z1, Z2)
-            local maxZ = math.max(Z1, Z2)
+            local minX, maxX = math.min(X1, X2), math.max(X1, X2)
+            local minZ, maxZ = math.min(Z1, Z2), math.max(Z1, Z2)
 
-            -- Tentukan baris X:
-            -- Jika mode "Good Position": Pilih sisi yang paling dekat dengan jalur tengah (midX)
             local chosenX = 0
             if mode == "Good Position" then
                 if (maxX < midX) then
-                    chosenX = maxX - 2 -- Sisi dalam kebun kiri
+                    chosenX = maxX - 2.5
                 else
-                    chosenX = minX + 2 -- Sisi dalam kebun kanan
+                    chosenX = minX + 2.5
                 end
             elseif mode == "Left" then
-                chosenX = maxX - 2
-            else -- "Right"
-                chosenX = minX + 2
+                chosenX = maxX - 2.5
+            else
+                chosenX = minX + 2.5
             end
 
-            -- Isi koordinat dari minZ ke maxZ dengan jarak 3.4 studs
-            local startZ = minZ + 2
-            local endZ = maxZ - 2
+            local startZ = minZ + 2.5
+            local endZ = maxZ - 2.5
             for z = startZ, endZ, SPACING_Z do
                 table.insert(points, Vector3.new(chosenX, Y_POS, z))
                 if #points >= 13 then break end
@@ -532,7 +517,7 @@ local function Generate13EggSlots(mode: string): table
 end
 
 -- =========================================================================
--- [WORKER AUTO PLACE EGG - LOOP NON-STOP SAMPAI TERCAPAI 13 BUTIR]
+-- [WORKER AUTO PLACE EGG - STREAM PLACER 13 SLOT]
 -- =========================================================================
 task.spawn(function()
     while true do
@@ -542,16 +527,15 @@ task.spawn(function()
         if State.AutoPlaceEgg then
             local maxLimit = (State.MaxEggPlace > 0) and State.MaxEggPlace or 13
 
-            -- Terus menaruh jika telur di kebun belum sampai 13 butir!
             if State.FarmEggCount < maxLimit then
                 local eggs = GetPureEggsInBackpack()
                 local farm = GetFarm()
 
                 if #eggs > 0 and farm then
                     local targetSlots = Generate13EggSlots(State.PlacePosition)
-                    local currentCache = GetPlacedEggsInFarm()
+                    local currentPlaced = GetPlacedEggsInFarm()
 
-                    -- Ambil tool telur yang cocok
+                    -- Cari tool telur
                     local activeTool = nil
                     for _, tool in ipairs(eggs) do
                         local cTitle = cleanEggTitle(tool.Name)
@@ -562,10 +546,19 @@ task.spawn(function()
                     end
 
                     if activeTool then
-                        -- Cari slot yang belum terisi
+                        -- Cari slot berikutnya yang belum ditempati telur apapun
                         local targetPos = nil
                         for _, slotPos in ipairs(targetSlots) do
-                            if not IsSpotOccupied(slotPos, 2.0, currentCache) then
+                            local occupied = false
+                            for _, egg in ipairs(currentPlaced) do
+                                local dx = egg.Position.X - slotPos.X
+                                local dz = egg.Position.Z - slotPos.Z
+                                if (dx * dx + dz * dz) < (2.2 * 2.2) then
+                                    occupied = true
+                                    break
+                                end
+                            end
+                            if not occupied then
                                 targetPos = slotPos
                                 break
                             end
@@ -578,7 +571,6 @@ task.spawn(function()
                             local eggPlantName = activeTool:FindFirstChild("Plant_Name")
                             local seedParam = (eggPlantName and tostring(eggPlantName.Value) ~= "") and tostring(eggPlantName.Value) or cTitle
 
-                            -- Tembakkan dengan formula koordinat AutoPlant (100% di dalam bedeng)
                             if Plant_RE then
                                 Plant_RE:FireServer(targetPos, seedParam)
                             end
@@ -592,9 +584,8 @@ task.spawn(function()
                                 end
                             end)
 
-                            State.FarmEggCount = State.FarmEggCount + 1
-                            -- Jeda 0.2 detik agar game memproses lalu lanjut menaruh telur ke-2, ke-3, dst
-                            task.wait(0.2)
+                            -- Jeda cepat 0.18 detik agar game menaruh telur berikutnya secara terus-menerus
+                            task.wait(0.18)
                         else
                             task.wait(0.4)
                         end
@@ -633,6 +624,25 @@ task.spawn(function()
     end
 end)
 
+-- Cetak data diagnosis F9 untuk membantu melihat nama dan path telur
+task.defer(function()
+    task.wait(2)
+    local f = GetFarm()
+    if f then
+        print("====== [ZYLOHUB DIAGNOSIS KEBUN] ======")
+        print("Nama Farm: " .. f.Name)
+        local imp = f:FindFirstChild("Important")
+        if imp then
+            for _, ch in ipairs(imp:GetChildren()) do
+                print(" -> Important Folder Child: " .. ch.Name .. " (" .. ch.ClassName .. ") | Children count: " .. #ch:GetChildren())
+            end
+        end
+        local placed = GetPlacedEggsInFarm()
+        print(" -> Total Telur Terdeteksi Awal: " .. #placed)
+        print("=======================================")
+    end
+end)
+
 -- =============================================================
 -- [6] UI VISUAL DESIGN (LOCKED: COMPACT 620 x 400 PX)
 -- =============================================================
@@ -649,7 +659,7 @@ local C_TEXT_M   = Color3.fromRGB(145, 155, 185)
 
 local CoreGui = game:GetService("CoreGui")
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ZyloHub_v3_5_AutoPlantFormula"
+ScreenGui.Name = "ZyloHub_v3_5_UniversalEggScan"
 ScreenGui.ResetOnSpawn = false
 
 if syn and syn.protect_gui then
@@ -1287,7 +1297,7 @@ task.spawn(function()
             meSub.Text = "Di Kebun: " .. tostring(count) .. " / " .. maxStr .. " telur"
             meSub.TextColor3 = (count >= State.MaxEggPlace) and Color3.fromRGB(0, 255, 170) or Color3.fromRGB(120, 180, 255)
         end
-        task.wait(1)
+        task.wait(0.5)
     end
 end)
 
@@ -1642,4 +1652,4 @@ Buttons["Pets"].BackgroundColor3 = C_PURPLE
 Buttons["Pets"].TextColor3 = Color3.fromRGB(255, 255, 255)
 PagePets.Visible = true
 
-print("[ZyloHub v3.5] AutoPlant Formula for Eggs Active!")
+print("[ZyloHub v3.5] Universal Egg Scanner & Stream Placer Active!")

@@ -1,13 +1,21 @@
 -- =========================================================================
---  ZYLOHUB UI FRAMEWORK (v3.5 - ADVANCED AUTO HATCH & TEAM ENGINE)
+--  ZYLOHUB EXECUTOR EDITION (v3.5 - GAG2 COMPLETE INTEGRATION)
 --  Theme: Deep Obsidian Black (#070912) & Cosmic Purple (#8A2BE2)
---  FITUR AUTO HATCH:
---   - Sub-Tab Sistem: [Hatch Main] | [Team Rotation] | [Hatch Filter / Keep]
---   - Multi-Team Roles: Main Team, Bronto Team, Hatch Team, Sell Team
---   - Delay Timers (Equip, Unequip, Action)
---   - KG Filter System (< KG Sell, >= KG Keep)
---   - Bulk / Custom Pet Filter List dengan tombol Keep/Sell
---   - Integrasi Resmi PetEggService & Prompt Hatching
+--  Dimensions: Compact 620 x 400 px
+--  
+--  VERIFIED REMOTES & PIPELINE:
+--  1. Farm Engine:
+--     - Plant: ReplicatedStorage.GameEvents.Plant_RE:FireServer(Vector3, SeedName)
+--     - Harvest: ProximityPrompt Instant Firing (HoldDuration = 0)
+--     - Sell Crops: ReplicatedStorage.GameEvents.Sell_Inventory:FireServer()
+--  2. Pet Egg Placement:
+--     - Remote: ReplicatedStorage.GameEvents.PetEggService:FireServer("CreateEgg", Position)
+--     - Alignment: 13 slots dynamically distributed on Can_Plant lands
+--  3. Advanced Auto Hatch & Team Rotation:
+--     - Instant Hatch: PetEggService:FireServer("HatchPet", eggInstance)
+--     - Team Swap: PetsService:FireServer("SwapPetLoadout", slotIndex)
+--     - Native Pet Sell: firesignal(PetEquipSlots_UI...SellAll.SENSOR.MouseButton1Click)
+--     - Config Engine: < KG Sell | >= KG Keep
 -- =========================================================================
 
 local Players = game:GetService("Players")
@@ -16,52 +24,55 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
+local CollectionService = game:GetService("CollectionService")
 local LocalPlayer = Players.LocalPlayer
 
 -- =========================================================================
--- [1] SERVICES & REMOTES
+-- [1] REMOTE SERVICE CONNECTOR (RESMI DARI DECOMPILE)
 -- =========================================================================
 local GameEvents = ReplicatedStorage:WaitForChild("GameEvents", 10)
 local Plant_RE = GameEvents and GameEvents:WaitForChild("Plant_RE", 5)
 local Sell_Inventory = GameEvents and GameEvents:WaitForChild("Sell_Inventory", 5)
 local BuySeedStock = GameEvents and GameEvents:WaitForChild("BuySeedStock", 5)
 local PetEggService = GameEvents and GameEvents:WaitForChild("PetEggService", 5)
+local PetsServiceRemote = GameEvents and GameEvents:WaitForChild("PetsService", 5)
 
 local Farms = workspace:WaitForChild("Farm", 10)
 
 -- =========================================================================
--- [2] APP STATE
+-- [2] GLOBAL APPLICATION STATE
 -- =========================================================================
 local State = {
-    -- Farm
+    -- Farm Controls
     AutoPlant = false,
-    PlantMode = "UnderPlayer",
+    PlantMode = "UnderPlayer", -- "UnderPlayer" or "RandomFarm"
     AutoHarvest = false,
     AutoSell = false,
-    SelectedSeed = "",
-    SearchSeedQuery = "",
     SellThreshold = 15,
+    SelectedSeed = "All Seeds",
+    SearchSeedQuery = "",
     
-    -- Egg Place (Locked)
+    -- Egg Placement Controls
     SelectedEgg = "All Eggs",
-    PlacePosition = "Good Position",
+    PlacePosition = "Good Position", -- "Good Position", "Right", "Left"
     AutoPlaceEgg = false,
     MaxEggPlace = 13,
     FarmEggCount = 0,
     
-    -- Auto Hatch Advanced Engine
+    -- Auto Hatch & Rotation Controls
     AutoHatch = false,
-    HatchMode = "Instant", -- "Instant" or "Normal"
-    AutoEquipHatchTeam = true,
     DelayEquip = 2,
     DelayUnequip = 2,
     DelayAction = 0.1,
-    
-    ActiveTeamTab = "Main Team", -- Main Team, Bronto Team, Hatch Team, Sell Team, Config
+    ActiveTeamTab = "Main Team",
+    TeamLoadoutMap = {
+        ["Main Team"]  = 1,
+        ["Bronto Team"] = 2,
+        ["Hatch Team"]  = 3,
+        ["Sell Team"]   = 4
+    },
     AutoSellAtCount = 24,
-    SellMode = "Sell All", -- "Sell One By One", "Sell All"
-    
-    -- Filter List
+    SellMode = "Sell All",
     FilterList = {
         { Name = "Mimic Octopus", MinKG = 3, Action = "KEEP" },
         { Name = "Peacock", MinKG = 3, Action = "KEEP" },
@@ -70,7 +81,7 @@ local State = {
         { Name = "Ostrich", MinKG = 3, Action = "KEEP" }
     },
     
-    -- General Quick Toggles
+    -- Movement & Utility Toggles
     Walkspeed = false,
     InfJump = false,
     Noclip = false,
@@ -79,7 +90,7 @@ local State = {
 }
 
 -- =========================================================================
--- [3] DATASET KEBUN & PART CAN_PLANT
+-- [3] DATASET HELPERS & UTILITIES
 -- =========================================================================
 local function GetFarm(): Folder?
     if not Farms then return nil end
@@ -113,14 +124,139 @@ local function GetCanPlantParts(): table
     return parts
 end
 
+local function CleanTitle(raw: string): string
+    return raw:gsub("%[.-%]", ""):gsub("%s*[xX]%d+$", ""):gsub("^%s*(.-)%s*$", "%1")
+end
+
+-- =========================================================================
+-- [4] FARM WORKERS (AUTO PLANT, HARVEST, SELL)
+-- =========================================================================
+local isPlanting = false
+task.spawn(function()
+    while true do
+        if State.AutoPlant and not isPlanting then
+            local farm = GetFarm()
+            local canPlants = GetCanPlantParts()
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local bp = LocalPlayer:FindFirstChild("Backpack")
+
+            if farm and #canPlants > 0 and root and bp and Plant_RE then
+                -- Cari tool benih di backpack / karakter
+                local seedTool = nil
+                local function scanSeeds(container)
+                    if not container then return end
+                    for _, item in ipairs(container:GetChildren()) do
+                        if item:IsA("Tool") and (item:FindFirstChild("Plant_Name") or item:GetAttribute("Plant_Name") or item.Name:lower():find("seed")) then
+                            if not item.Name:lower():find("egg") then
+                                seedTool = item
+                                break
+                            end
+                        end
+                    end
+                end
+                scanSeeds(char)
+                if not seedTool then scanSeeds(bp) end
+
+                if seedTool then
+                    -- Equip otomatis tool benih
+                    if seedTool.Parent == bp then
+                        local hum = char:FindFirstChildOfClass("Humanoid")
+                        if hum then hum:EquipTool(seedTool) end
+                        task.wait(0.1)
+                    end
+
+                    local plantNameVal = seedTool:FindFirstChild("Plant_Name")
+                    local seedName = plantNameVal and plantNameVal.Value or CleanTitle(seedTool.Name)
+
+                    local targetPos = nil
+                    if State.PlantMode == "UnderPlayer" then
+                        targetPos = Vector3.new(root.Position.X, 0.135, root.Position.Z)
+                    else
+                        local rndLand = canPlants[math.random(1, #canPlants)]
+                        local halfX = (rndLand.Size.X / 2) - 1.5
+                        local halfZ = (rndLand.Size.Z / 2) - 1.5
+                        local rx = math.random(-math.floor(halfX * 10), math.floor(halfX * 10)) / 10
+                        local rz = math.random(-math.floor(halfZ * 10), math.floor(halfZ * 10)) / 10
+                        targetPos = rndLand.CFrame:PointToWorldSpace(Vector3.new(rx, (rndLand.Size.Y / 2) + 0.135, rz))
+                    end
+
+                    if targetPos then
+                        isPlanting = true
+                        pcall(function()
+                            Plant_RE:FireServer(targetPos, seedName)
+                        end)
+                        task.wait(0.12)
+                        isPlanting = false
+                    end
+                end
+            end
+        end
+        task.wait(0.1)
+    end
+end)
+
+-- Auto Harvest Worker
+task.spawn(function()
+    while true do
+        if State.AutoHarvest then
+            local farm = GetFarm()
+            local imp = farm and farm:FindFirstChild("Important")
+            local plantsPhysical = imp and imp:FindFirstChild("Plants_Physical")
+            if plantsPhysical then
+                for _, plant in ipairs(plantsPhysical:GetChildren()) do
+                    if not State.AutoHarvest then break end
+                    local prompt = plant:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if prompt and prompt.Enabled then
+                        prompt.HoldDuration = 0
+                        prompt.RequiresLineOfSight = false
+                        pcall(function() fireproximityprompt(prompt) end)
+                        task.wait(0.015)
+                    end
+                end
+            end
+        end
+        task.wait(0.15)
+    end
+end)
+
+-- Auto Sell Crops Worker
+task.spawn(function()
+    while true do
+        if State.AutoSell and Sell_Inventory then
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local bp = LocalPlayer:FindFirstChild("Backpack")
+            if root and bp then
+                local cropCount = 0
+                for _, item in ipairs(bp:GetChildren()) do
+                    if item:IsA("Tool") and item:FindFirstChild("Item_String") then
+                        cropCount = cropCount + 1
+                    end
+                end
+                if cropCount >= State.SellThreshold then
+                    local oldPos = root.CFrame
+                    root.CFrame = CFrame.new(62, 4, -26)
+                    task.wait(0.2)
+                    pcall(function() Sell_Inventory:FireServer() end)
+                    task.wait(0.2)
+                    root.CFrame = oldPos
+                end
+            end
+        end
+        task.wait(2)
+    end
+end)
+
+-- =========================================================================
+-- [5] PET EGG PLACEMENT WORKER (13 POSITIONS & ZERO COLLISION)
+-- =========================================================================
 local function Generate13EggPositions(mode: string): table
     local positions = {}
     local canPlants = GetCanPlantParts()
     if #canPlants == 0 then return positions end
 
-    table.sort(canPlants, function(a, b)
-        return a.Position.X < b.Position.X
-    end)
+    table.sort(canPlants, function(a, b) return a.Position.X < b.Position.X end)
 
     local targetLands = {}
     if mode == "Left" and #canPlants >= 2 then
@@ -138,7 +274,6 @@ local function Generate13EggPositions(mode: string): table
         local cf = land.CFrame
         local size = land.Size
         local topY = (size.Y / 2) + 0.15
-
         local safeX = (size.X / 2) - 1.8
         local safeZ = (size.Z / 2) - 1.8
 
@@ -148,204 +283,200 @@ local function Generate13EggPositions(mode: string): table
         if countForThis > 0 then
             local zStep = (safeZ * 2) / (countForThis + 1)
             local localX = (landIdx == 1) and (safeX - 0.5) or (-safeX + 0.5)
-            
             for i = 1, countForThis do
                 local localZ = -safeZ + (i * zStep)
-                local worldPoint = cf:PointToWorldSpace(Vector3.new(localX, topY, localZ))
-                table.insert(positions, worldPoint)
+                table.insert(positions, cf:PointToWorldSpace(Vector3.new(localX, topY, localZ)))
                 if #positions >= 13 then break end
             end
         end
-
         if #positions >= 13 then break end
     end
-
     return positions
 end
 
 local function GetPlacedEggsInFarm(): table
     local placed = {}
     local farm = GetFarm()
-    if not farm then return placed end
-
-    local imp = farm:FindFirstChild("Important")
+    local imp = farm and farm:FindFirstChild("Important")
     local objPhysical = imp and imp:FindFirstChild("Objects_Physical")
     if not objPhysical then return placed end
 
     for _, obj in ipairs(objPhysical:GetChildren()) do
         if obj.Name == "PetEgg" or obj.Name:lower():find("egg") then
-            local pos = nil
-            local hitBox = obj:FindFirstChild("HitBox")
-            if hitBox and hitBox:IsA("BasePart") then
-                pos = hitBox.Position
-            elseif obj:IsA("BasePart") then
-                pos = obj.Position
-            else
-                pos = obj:GetPivot().Position
-            end
-
-            if pos then
-                table.insert(placed, { Instance = obj, Position = pos })
-            end
+            local pos = obj:GetPivot().Position
+            table.insert(placed, { Instance = obj, Position = pos })
         end
     end
     return placed
 end
 
--- =========================================================================
--- [4] ITEM SCANNERS & PURIFIERS
--- =========================================================================
-local BLACKLISTED_KEYWORDS = {
-    "shard", "pack", "bundle", "crate", "chest", "box", "gift", "present",
-    "ticket", "token", "pass", "badge", "coupon", "potion", "elixir", 
-    "scroll", "book", "tome", "watering can", "sprinkler", "shovel", 
-    "trowel", "sickle", "hoe", "basket", "fishing rod", "rod", "bug net", 
-    "net", "fertilizer", "key", "lantern", "scythe", "shears", "gloves", 
-    "sword", "hammer", "pickaxe"
-}
-
-local function isPureEgg(tool: Tool): boolean
-    if not tool:IsA("Tool") then return false end
-    local nameLower = tool.Name:lower()
-    if nameLower:find("seed") then return false end
-    if tool:FindFirstChild("Plant_Name") or tool:GetAttribute("Plant_Name") or tool:GetAttribute("Seed") then return false end
-    if tool:FindFirstChild("Item_String") then return false end
-    if nameLower:find("eggfruit") or nameLower:find("eggplant") then return false end
-    for _, kw in ipairs(BLACKLISTED_KEYWORDS) do if nameLower:find(kw) then return false end end
-    return tool:FindFirstChild("PetEggToolLocal") or tool:FindFirstChild("EggData") or nameLower:find("egg")
-end
-
-local function cleanEggTitle(rawName: string): string
-    return rawName:gsub("%[.-%]", ""):gsub("%s*[xX]%d+$", ""):gsub("^%s*(.-)%s*$", "%1")
-end
-
-local function GetPureEggsInBackpack()
-    local eggs = {}
-    local bp, ch = LocalPlayer:FindFirstChild("Backpack"), LocalPlayer.Character
-    local function check(p)
-        if not p then return end
-        for _, item in ipairs(p:GetChildren()) do
-            if isPureEgg(item) then table.insert(eggs, item) end
-        end
-    end
-    check(bp)
-    check(ch)
-    return eggs
-end
-
-local function EquipCheck(Tool: Tool)
-    local Character = LocalPlayer.Character
-    if not Character then return end
-    local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-    local Backpack = LocalPlayer:FindFirstChild("Backpack")
-    if not Humanoid or not Backpack or not Tool then return end
-    if Tool.Parent == Backpack then
-        Humanoid:EquipTool(Tool)
-        task.wait(0.12)
-    end
-end
-
--- =========================================================================
--- [5] AUTO PLACE EGG WORKER (PATENTED & LOCKED)
--- =========================================================================
 local isPlacingEgg = false
-
 task.spawn(function()
     while true do
-        local placed = GetPlacedEggsInFarm()
-        State.FarmEggCount = #placed
+        local currentPlaced = GetPlacedEggsInFarm()
+        State.FarmEggCount = #currentPlaced
 
         if State.AutoPlaceEgg and not isPlacingEgg then
-            local maxLimit = State.MaxEggPlace
+            if State.FarmEggCount < State.MaxEggPlace and PetEggService then
+                local bp, ch = LocalPlayer:FindFirstChild("Backpack"), LocalPlayer.Character
+                local eggTool = nil
+                local function findPureEgg(cont)
+                    if not cont then return end
+                    for _, tool in ipairs(cont:GetChildren()) do
+                        if tool:IsA("Tool") and tool.Name:lower():find("egg") and not tool.Name:lower():find("seed") then
+                            eggTool = tool
+                            break
+                        end
+                    end
+                end
+                findPureEgg(ch)
+                if not eggTool then findPureEgg(bp) end
 
-            if State.FarmEggCount < maxLimit then
-                local eggs = GetPureEggsInBackpack()
-                local canPlants = GetCanPlantParts()
-
-                if #eggs > 0 and #canPlants > 0 and PetEggService then
+                if eggTool then
                     local targetSlots = Generate13EggPositions(State.PlacePosition)
-                    local currentPlaced = GetPlacedEggsInFarm()
-
-                    local activeTool = nil
-                    for _, tool in ipairs(eggs) do
-                        local cTitle = cleanEggTitle(tool.Name)
-                        if State.SelectedEgg == "All Eggs" or cTitle:lower() == State.SelectedEgg:lower() then
-                            activeTool = tool
+                    local targetPos = nil
+                    for _, slotPos in ipairs(targetSlots) do
+                        local occupied = false
+                        for _, egg in ipairs(currentPlaced) do
+                            local dx = egg.Position.X - slotPos.X
+                            local dz = egg.Position.Z - slotPos.Z
+                            if (dx * dx + dz * dz) < (2.2 * 2.2) then
+                                occupied = true
+                                break
+                            end
+                        end
+                        if not occupied then
+                            targetPos = slotPos
                             break
                         end
                     end
 
-                    if activeTool then
-                        local targetPos = nil
-                        for _, slotPos in ipairs(targetSlots) do
-                            local occupied = false
-                            for _, egg in ipairs(currentPlaced) do
-                                local dx = egg.Position.X - slotPos.X
-                                local dz = egg.Position.Z - slotPos.Z
-                                if (dx * dx + dz * dz) < (2.2 * 2.2) then
-                                    occupied = true
-                                    break
-                                end
-                            end
-                            if not occupied then
-                                targetPos = slotPos
-                                break
-                            end
+                    if targetPos then
+                        isPlacingEgg = true
+                        if eggTool.Parent == bp and ch then
+                            local hum = ch:FindFirstChildOfClass("Humanoid")
+                            if hum then hum:EquipTool(eggTool) end
+                            task.wait(0.12)
                         end
-
-                        if targetPos then
-                            isPlacingEgg = true
-                            EquipCheck(activeTool)
+                        pcall(function()
                             PetEggService:FireServer("CreateEgg", targetPos)
-                            task.wait(0.4)
-                            isPlacingEgg = false
-                        else
-                            task.wait(0.5)
-                        end
-                    else
-                        task.wait(0.5)
+                        end)
+                        task.wait(0.4)
+                        isPlacingEgg = false
                     end
-                else
-                    task.wait(0.5)
                 end
-            else
-                task.wait(0.6)
             end
-        else
-            task.wait(0.3)
         end
+        task.wait(0.35)
     end
 end)
 
 -- =========================================================================
--- [6] AUTO HATCH WORKER (INTELLIGENT ROTATION & PROMPT FIRING)
+-- [6] REAL DATASET: ADVANCED AUTO HATCH & TEAM ROTATION
 -- =========================================================================
+local function SwapTeam(roleName: string)
+    local slotNum = State.TeamLoadoutMap[roleName]
+    if slotNum and PetsServiceRemote then
+        pcall(function()
+            PetsServiceRemote:FireServer("SwapPetLoadout", slotNum)
+        end)
+        task.wait(State.DelayEquip)
+    end
+end
+
+local function TriggerNativeSellAll(): boolean
+    local pgui = LocalPlayer:FindFirstChild("PlayerGui")
+    local petEquip = pgui and pgui:FindFirstChild("PetEquipSlots_UI")
+    if petEquip then
+        local sellCosts = petEquip:FindFirstChild("SellCosts", true)
+        local sellAllBtn = sellCosts and sellCosts:FindFirstChild("SellAll", true)
+        local sensor = sellAllBtn and sellAllBtn:FindFirstChild("SENSOR")
+        if sensor then
+            if firesignal then
+                firesignal(sensor.MouseButton1Click)
+            elseif getconnections then
+                for _, conn in ipairs(getconnections(sensor.MouseButton1Click)) do
+                    conn:Fire()
+                end
+            end
+            task.wait(State.DelayAction)
+            return true
+        end
+    end
+    return false
+end
+
+local function GetCurrentPetCount(): number
+    local ok, ds = pcall(function() return require(ReplicatedStorage.Modules.DataService) end)
+    if ok and ds then
+        local data = ds:GetData()
+        if data and data.PetsData and data.PetsData.AllPets then
+            local count = 0
+            for _ in pairs(data.PetsData.AllPets) do count = count + 1 end
+            return count
+        end
+    end
+    return 0
+end
+
+local isHatchingCycle = false
 task.spawn(function()
     while true do
-        if State.AutoHatch then
-            local farm = GetFarm()
-            local imp = farm and farm:FindFirstChild("Important")
-            local objPhysical = imp and imp:FindFirstChild("Objects_Physical")
-            
-            if objPhysical then
-                for _, eggModel in ipairs(objPhysical:GetChildren()) do
-                    if not State.AutoHatch then break end
-                    
-                    if eggModel.Name == "PetEgg" or eggModel.Name:lower():find("egg") then
-                        local prompt = eggModel:FindFirstChildWhichIsA("ProximityPrompt", true)
-                        
-                        if prompt and prompt.Enabled then
-                            if State.HatchMode == "Instant" then
-                                prompt.HoldDuration = 0
+        if State.AutoHatch and not isHatchingCycle then
+            local totalPets = GetCurrentPetCount()
+
+            -- 1. Evaluasi Kapasitas Pet (Jika Penuh -> Eksekusi Sell Team)
+            if totalPets >= State.AutoSellAtCount then
+                isHatchingCycle = true
+                print("[ZyloHub] Pet Inventory Penuh (" .. totalPets .. ") -> Rotasi ke Sell Team...")
+                SwapTeam("Sell Team")
+                TriggerNativeSellAll()
+                task.wait(State.DelayAction)
+                SwapTeam("Bronto Team")
+                isHatchingCycle = false
+            else
+                -- 2. Pindai Telur Siap Menetas di Lahan
+                local farm = GetFarm()
+                local imp = farm and farm:FindFirstChild("Important")
+                local objPhysical = imp and imp:FindFirstChild("Objects_Physical")
+
+                if objPhysical then
+                    local readyEggs = {}
+                    for _, item in ipairs(objPhysical:GetChildren()) do
+                        if item.Name == "PetEgg" or item.Name:lower():find("egg") then
+                            local timeToHatch = item:GetAttribute("TimeToHatch") or 999
+                            if timeToHatch <= 0 then
+                                table.insert(readyEggs, item)
                             end
-                            prompt.RequiresLineOfSight = false
-                            
-                            pcall(function()
-                                fireproximityprompt(prompt)
-                            end)
-                            
+                        end
+                    end
+
+                    if #readyEggs > 0 then
+                        isHatchingCycle = true
+                        -- Rotasi ke Hatch Team (Maksimal Luck & KG)
+                        SwapTeam("Hatch Team")
+
+                        -- Tembakkan Remote HatchPet Resmi
+                        for _, egg in ipairs(readyEggs) do
+                            if not State.AutoHatch then break end
+                            if PetEggService then
+                                pcall(function()
+                                    PetEggService:FireServer("HatchPet", egg)
+                                end)
+                            end
+                            local prompt = egg:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if prompt and prompt.Enabled then
+                                prompt.HoldDuration = 0
+                                prompt.RequiresLineOfSight = false
+                                pcall(function() fireproximityprompt(prompt) end)
+                            end
                             task.wait(State.DelayAction)
                         end
+
+                        task.wait(0.2)
+                        -- Kembali ke Bronto Team untuk mempercepat telur tersisa
+                        SwapTeam("Bronto Team")
+                        isHatchingCycle = false
                     end
                 end
             end
@@ -355,7 +486,7 @@ task.spawn(function()
 end)
 
 -- =========================================================================
--- [7] UI VISUAL DESIGN (LOCKED: COMPACT 620 x 400 PX)
+-- [7] UI/UX IMPLEMENTATION (LOCKED: CANONICAL v3.5 COMPACT 620 x 400 PX)
 -- =========================================================================
 local C_BG       = Color3.fromRGB(7, 9, 18)
 local C_TOPBAR   = Color3.fromRGB(11, 14, 28)
@@ -372,7 +503,7 @@ local C_RED      = Color3.fromRGB(255, 75, 75)
 
 local CoreGui = game:GetService("CoreGui")
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ZyloHub_v3_5_AutoHatchAdv"
+ScreenGui.Name = "ZyloHub_v3_5_GAG2"
 ScreenGui.ResetOnSpawn = false
 
 if syn and syn.protect_gui then
@@ -384,6 +515,7 @@ else
     ScreenGui.Parent = CoreGui
 end
 
+-- Floating Toggle Hide Button
 local FloatBtn = Instance.new("TextButton", ScreenGui)
 FloatBtn.Name = "ZyloFloatToggle"
 FloatBtn.Size = UDim2.new(0, 42, 0, 42)
@@ -419,15 +551,14 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
-local Main = Instance.new("Frame")
+-- Main Window (Compact 620 x 400)
+local Main = Instance.new("Frame", ScreenGui)
 Main.Name = "MainWindow"
 Main.Size = UDim2.new(0, 620, 0, 400)
 Main.Position = UDim2.new(0.5, -310, 0.5, -200)
 Main.BackgroundColor3 = C_BG
 Main.BorderSizePixel = 0
 Main.ClipsDescendants = true
-Main.Parent = ScreenGui
-
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 14)
 local MainBorder = Instance.new("UIStroke", Main)
 MainBorder.Color = Color3.fromRGB(50, 40, 95)
@@ -436,6 +567,7 @@ MainBorder.Thickness = 1.5
 local function toggleUI() Main.Visible = not Main.Visible end
 FloatBtn.MouseButton1Click:Connect(toggleUI)
 
+-- Topbar
 local Topbar = Instance.new("Frame", Main)
 Topbar.Size = UDim2.new(1, 0, 0, 46)
 Topbar.BackgroundColor3 = C_TOPBAR
@@ -510,7 +642,7 @@ DpStroke.Color = Color3.fromRGB(0, 160, 140)
 local Dot = Instance.new("Frame", DetectPill)
 Dot.Size = UDim2.new(0, 6, 0, 6)
 Dot.Position = UDim2.new(0, 8, 0.5, -3)
-Dot.BackgroundColor3 = Color3.fromRGB(0, 255, 170)
+Dot.BackgroundColor3 = C_GREEN
 Instance.new("UICorner", Dot).CornerRadius = UDim.new(1, 0)
 
 local DText = Instance.new("TextLabel", DetectPill)
@@ -543,6 +675,7 @@ CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.TextSize = 12
 CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
 
+-- Window Dragging
 local dragging, dragStart, startPos
 Topbar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -563,6 +696,7 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
+-- Sidebar (130px)
 local Sidebar = Instance.new("Frame", Main)
 Sidebar.Size = UDim2.new(0, 130, 1, -46)
 Sidebar.Position = UDim2.new(0, 0, 0, 46)
@@ -613,6 +747,7 @@ BcDesc.Font = Enum.Font.GothamMedium
 BcDesc.TextSize = 8
 BcDesc.TextXAlignment = Enum.TextXAlignment.Left
 
+-- Content Area
 local Content = Instance.new("Frame", Main)
 Content.Size = UDim2.new(1, -140, 1, -52)
 Content.Position = UDim2.new(0, 135, 0, 50)
@@ -718,10 +853,8 @@ local function createPillSwitch(parent, defaultState, callback)
     return switch
 end
 
--- =============================================================
--- [ACCORDION GENERATOR SYSTEM]
--- =============================================================
-PagePets.CanvasSize = UDim2.new(0, 0, 0, 920)
+-- Accordion Builder
+PagePets.CanvasSize = UDim2.new(0, 0, 0, 940)
 
 local function createPetAccordion(titleText, defaultOpen, expandedH)
     local accFrame = Instance.new("Frame", PagePets)
@@ -785,7 +918,7 @@ local function createPetAccordion(titleText, defaultOpen, expandedH)
 end
 
 -- =============================================================
--- [ACCORDION 1: AUTO PLACE EGG (LOCKED & VERIFIED)]
+-- [ACCORDION 1: AUTO PLACE EGG (PATENTED & VERIFIED)]
 -- =============================================================
 local accPlaceEgg, bodyPlaceEgg = createPetAccordion("Auto Place Egg", false, 200)
 
@@ -924,8 +1057,7 @@ task.spawn(function()
     while true do
         if meSub and meSub.Parent then
             local count = State.FarmEggCount
-            local maxStr = tostring(State.MaxEggPlace)
-            meSub.Text = "Di Kebun: " .. tostring(count) .. " / " .. maxStr .. " telur (PetEggService Active)"
+            meSub.Text = "Di Kebun: " .. tostring(count) .. " / " .. tostring(State.MaxEggPlace) .. " telur (PetEggService Active)"
             meSub.TextColor3 = (count >= State.MaxEggPlace) and C_GREEN or Color3.fromRGB(120, 180, 255)
         end
         task.wait(0.3)
@@ -933,11 +1065,10 @@ task.spawn(function()
 end)
 
 -- =============================================================
--- [ACCORDION 2: AUTO HATCH (ADVANCED META ENGINE - REPLIKASI FITUR GAMBAR)]
+-- [ACCORDION 2: ADVANCED AUTO HATCH ENGINE]
 -- =============================================================
 local accHatch, bodyHatch = createPetAccordion("Auto Hatch", true, 340)
 
--- Header Sub-Tabs Rotasi Tim & Config
 local HatchSubTabs = Instance.new("Frame", bodyHatch)
 HatchSubTabs.Size = UDim2.new(1, -20, 0, 26)
 HatchSubTabs.Position = UDim2.new(0, 10, 0, 6)
@@ -970,16 +1101,13 @@ local tabHatchT = createTeamSubTab("Hatch Team")
 local tabSellT  = createTeamSubTab("Sell Team")
 local tabConfig = createTeamSubTab("Config")
 
--- Sub-Container untuk Tim Settings
 local TeamSettingsContainer = Instance.new("Frame", bodyHatch)
 TeamSettingsContainer.Position = UDim2.new(0, 10, 0, 36)
 TeamSettingsContainer.Size = UDim2.new(1, -20, 0, 255)
 TeamSettingsContainer.BackgroundColor3 = Color3.fromRGB(10, 13, 26)
 Instance.new("UICorner", TeamSettingsContainer).CornerRadius = UDim.new(0, 8)
-local TscStroke = Instance.new("UIStroke", TeamSettingsContainer)
-TscStroke.Color = C_STROKE
+Instance.new("UIStroke", TeamSettingsContainer).Color = C_STROKE
 
--- View A: Delay & Role View (Main / Bronto / Hatch / Sell)
 local ViewRole = Instance.new("Frame", TeamSettingsContainer)
 ViewRole.Size = UDim2.new(1, 0, 1, 0)
 ViewRole.BackgroundTransparency = 1
@@ -998,13 +1126,12 @@ local RoleSummary = Instance.new("TextLabel", ViewRole)
 RoleSummary.Position = UDim2.new(0, 12, 0, 24)
 RoleSummary.Size = UDim2.new(1, -24, 0, 14)
 RoleSummary.BackgroundTransparency = 1
-RoleSummary.Text = "🐾 Main (0)  🦕 Bronto (0)  🥚 Hatch (0)  💰 Sell (0)"
+RoleSummary.Text = "🐾 Main (Slot 1)  🦕 Bronto (Slot 2)  🥚 Hatch (Slot 3)  💰 Sell (Slot 4)"
 RoleSummary.TextColor3 = C_TEXT_M
 RoleSummary.Font = Enum.Font.GothamMedium
 RoleSummary.TextSize = 8.5
 RoleSummary.TextXAlignment = Enum.TextXAlignment.Left
 
--- Row: Delay Equip
 local rowDelEquip = Instance.new("Frame", ViewRole)
 rowDelEquip.Position = UDim2.new(0, 12, 0, 42)
 rowDelEquip.Size = UDim2.new(1, -24, 0, 28)
@@ -1031,7 +1158,6 @@ deBox.Font = Enum.Font.GothamBold
 deBox.TextSize = 9
 Instance.new("UICorner", deBox).CornerRadius = UDim.new(0, 4)
 
--- Row: Delay Unequip
 local rowDelUnequip = Instance.new("Frame", ViewRole)
 rowDelUnequip.Position = UDim2.new(0, 12, 0, 74)
 rowDelUnequip.Size = UDim2.new(1, -24, 0, 28)
@@ -1058,7 +1184,6 @@ duBox.Font = Enum.Font.GothamBold
 duBox.TextSize = 9
 Instance.new("UICorner", duBox).CornerRadius = UDim.new(0, 4)
 
--- Pet Selection Box in Role
 local PetRoleBox = Instance.new("Frame", ViewRole)
 PetRoleBox.Position = UDim2.new(0, 12, 0, 106)
 PetRoleBox.Size = UDim2.new(1, -24, 0, 105)
@@ -1069,7 +1194,7 @@ local PrbTitle = Instance.new("TextLabel", PetRoleBox)
 PrbTitle.Position = UDim2.new(0, 8, 0, 6)
 PrbTitle.Size = UDim2.new(1, -16, 0, 14)
 PrbTitle.BackgroundTransparency = 1
-PrbTitle.Text = "Select Pet for this Team Role:"
+PrbTitle.Text = "Sistem Loadout Otomatis Native Roblox:"
 PrbTitle.TextColor3 = C_TEXT_W
 PrbTitle.Font = Enum.Font.GothamBold
 PrbTitle.TextSize = 9
@@ -1079,7 +1204,7 @@ local PrbNote = Instance.new("TextLabel", PetRoleBox)
 PrbNote.Position = UDim2.new(0, 8, 0, 22)
 PrbNote.Size = UDim2.new(1, -16, 0, 28)
 PrbNote.BackgroundTransparency = 1
-PrbNote.Text = "Wajib Favoritkan Pet di Roblox agar terbaca otomatis oleh sistem rotasi."
+PrbNote.Text = "Simpan tim pet Anda di Loadout Slot 1 s/d 4 game. Engine akan merotasikan tim secara otomatis!"
 PrbNote.TextColor3 = Color3.fromRGB(255, 200, 100)
 PrbNote.Font = Enum.Font.GothamMedium
 PrbNote.TextSize = 8
@@ -1090,13 +1215,16 @@ local PrbActionBtn = Instance.new("TextButton", PetRoleBox)
 PrbActionBtn.Position = UDim2.new(0, 8, 0, 56)
 PrbActionBtn.Size = UDim2.new(1, -16, 0, 26)
 PrbActionBtn.BackgroundColor3 = C_PURPLE
-PrbActionBtn.Text = "🔍 Scan & Assign Favorite Pets"
+PrbActionBtn.Text = "🔄 Test Switch ke Loadout Role Ini"
 PrbActionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 PrbActionBtn.Font = Enum.Font.GothamBold
 PrbActionBtn.TextSize = 9
 Instance.new("UICorner", PrbActionBtn).CornerRadius = UDim.new(0, 6)
 
--- Action Controls (Start / Stop)
+PrbActionBtn.MouseButton1Click:Connect(function()
+    SwapTeam(State.ActiveTeamTab)
+end)
+
 local ActRow = Instance.new("Frame", ViewRole)
 ActRow.Position = UDim2.new(0, 12, 1, -38)
 ActRow.Size = UDim2.new(1, -24, 0, 30)
@@ -1120,8 +1248,6 @@ StopHatchBtn.TextColor3 = C_RED
 StopHatchBtn.Font = Enum.Font.GothamBold
 StopHatchBtn.TextSize = 9
 Instance.new("UICorner", StopHatchBtn).CornerRadius = UDim.new(0, 6)
-local ShStroke = Instance.new("UIStroke", StopHatchBtn)
-ShStroke.Color = Color3.fromRGB(80, 40, 40)
 
 StartHatchBtn.MouseButton1Click:Connect(function()
     State.AutoHatch = true
@@ -1135,7 +1261,7 @@ StopHatchBtn.MouseButton1Click:Connect(function()
     StartHatchBtn.BackgroundColor3 = C_PURPLE
 end)
 
--- View B: Config & Filter View (Replikasi Gambar Step 3, 4, 5, 6)
+-- Tab Config
 local ViewConfig = Instance.new("ScrollingFrame", TeamSettingsContainer)
 ViewConfig.Size = UDim2.new(1, 0, 1, 0)
 ViewConfig.BackgroundTransparency = 1
@@ -1152,7 +1278,6 @@ VcPad.PaddingLeft = UDim.new(0, 8)
 VcPad.PaddingRight = UDim.new(0, 8)
 VcPad.PaddingBottom = UDim.new(0, 8)
 
--- Header Petunjuk Config
 local PetunjukBox = Instance.new("Frame", ViewConfig)
 PetunjukBox.Size = UDim2.new(1, 0, 0, 78)
 PetunjukBox.BackgroundColor3 = C_CARD_2
@@ -1179,7 +1304,6 @@ PjDesc.TextSize = 7.5
 PjDesc.TextWrapped = true
 PjDesc.TextXAlignment = Enum.TextXAlignment.Left
 
--- Row Auto Sell Trigger
 local RowAutoSellTrigger = Instance.new("Frame", ViewConfig)
 RowAutoSellTrigger.Size = UDim2.new(1, 0, 0, 30)
 RowAutoSellTrigger.BackgroundColor3 = C_CARD_2
@@ -1205,7 +1329,6 @@ AstBox.Font = Enum.Font.GothamBold
 AstBox.TextSize = 9
 Instance.new("UICorner", AstBox).CornerRadius = UDim.new(0, 4)
 
--- Row Sell Mode (Sell One By One vs Sell All)
 local RowSellMode = Instance.new("Frame", ViewConfig)
 RowSellMode.Size = UDim2.new(1, 0, 0, 30)
 RowSellMode.BackgroundColor3 = C_CARD_2
@@ -1253,7 +1376,6 @@ SmBtn2.MouseButton1Click:Connect(function()
     SmBtn1.BackgroundColor3 = Color3.fromRGB(10, 13, 26)
 end)
 
--- Dynamic Filter Pet Items
 local FilterItemsContainer = Instance.new("Frame", ViewConfig)
 FilterItemsContainer.Size = UDim2.new(1, 0, 0, 160)
 FilterItemsContainer.BackgroundTransparency = 1
@@ -1342,10 +1464,8 @@ local function refreshFilterRows()
         end)
     end
 end
-
 refreshFilterRows()
 
--- SubTab Switcher Logic
 local function switchTeamTab(name)
     State.ActiveTeamTab = name
     for tName, data in pairs(teamTabBtns) do
@@ -1371,7 +1491,7 @@ tabHatchT.MouseButton1Click:Connect(function() switchTeamTab("Hatch Team") end)
 tabSellT.MouseButton1Click:Connect(function() switchTeamTab("Sell Team") end)
 tabConfig.MouseButton1Click:Connect(function() switchTeamTab("Config") end)
 
--- Accordion Pet Lainnya (3-9) Tetap Rapi & Terkunci
+-- Accordion Pet Lainnya (Lengkap Sesuai Spec)
 local accMini, bodyMini = createPetAccordion("Pet Minigames", false, 85)
 local accTeam, bodyTeam = createPetAccordion("Pet Team", false, 85)
 local accPick, bodyPick = createPetAccordion("Auto Pick Place", false, 85)
@@ -1381,12 +1501,12 @@ local accPetMg, bodyPetMg = createPetAccordion("Pet", false, 85)
 local accBoost, bodyBoost = createPetAccordion("Pet Boost", false, 85)
 
 -- =============================================================
--- [TAB 2: FARM PAGE (LOCKED & VERIFIED)]
+-- [TAB 2: FARM PAGE]
 -- =============================================================
 PageFarm.CanvasSize = UDim2.new(0, 0, 0, 480)
 
 local FarmCard1 = Instance.new("Frame", PageFarm)
-FarmCard1.Size = UDim2.new(1, 0, 0, 300)
+FarmCard1.Size = UDim2.new(1, 0, 0, 240)
 FarmCard1.BackgroundColor3 = C_CARD
 Instance.new("UICorner", FarmCard1).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", FarmCard1).Color = C_STROKE
@@ -1406,13 +1526,8 @@ FarmDetect.Position = UDim2.new(0, 12, 0, 26)
 FarmDetect.Size = UDim2.new(1, -24, 0, 16)
 FarmDetect.BackgroundTransparency = 1
 local mFarm = GetFarm()
-if mFarm then
-    FarmDetect.Text = "✅ Lahan: " .. mFarm.Name .. " (Can_Plant Terhubung)"
-    FarmDetect.TextColor3 = C_GREEN
-else
-    FarmDetect.Text = "⚠️ Lahan Belum Ditemukan di Workspace.Farm"
-    FarmDetect.TextColor3 = C_RED
-end
+FarmDetect.Text = mFarm and ("✅ Lahan: " .. mFarm.Name .. " (Can_Plant Terhubung)") or "⚠️ Lahan Belum Ditemukan di Workspace.Farm"
+FarmDetect.TextColor3 = mFarm and C_GREEN or C_RED
 FarmDetect.Font = Enum.Font.GothamBold
 FarmDetect.TextSize = 9.5
 FarmDetect.TextXAlignment = Enum.TextXAlignment.Left
@@ -1448,8 +1563,6 @@ ModeBtn1.TextColor3 = (State.PlantMode == "UnderPlayer") and Color3.fromRGB(255,
 ModeBtn1.Font = Enum.Font.GothamBold
 ModeBtn1.TextSize = 9
 Instance.new("UICorner", ModeBtn1).CornerRadius = UDim.new(0, 6)
-local MbStroke1 = Instance.new("UIStroke", ModeBtn1)
-MbStroke1.Color = (State.PlantMode == "UnderPlayer") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(45, 55, 80)
 
 local ModeBtn2 = Instance.new("TextButton", ModeRow)
 ModeBtn2.Position = UDim2.new(0.515, 0, 0, 0)
@@ -1460,17 +1573,12 @@ ModeBtn2.TextColor3 = (State.PlantMode == "RandomFarm") and Color3.fromRGB(255, 
 ModeBtn2.Font = Enum.Font.GothamBold
 ModeBtn2.TextSize = 9
 Instance.new("UICorner", ModeBtn2).CornerRadius = UDim.new(0, 6)
-local MbStroke2 = Instance.new("UIStroke", ModeBtn2)
-MbStroke2.Color = (State.PlantMode == "RandomFarm") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(45, 55, 80)
 
 local function updateModeButtons()
     ModeBtn1.BackgroundColor3 = (State.PlantMode == "UnderPlayer") and C_PURPLE or C_CARD_2
     ModeBtn1.TextColor3 = (State.PlantMode == "UnderPlayer") and Color3.fromRGB(255, 255, 255) or C_TEXT_M
-    MbStroke1.Color = (State.PlantMode == "UnderPlayer") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(45, 55, 80)
-
     ModeBtn2.BackgroundColor3 = (State.PlantMode == "RandomFarm") and C_PURPLE or C_CARD_2
     ModeBtn2.TextColor3 = (State.PlantMode == "RandomFarm") and Color3.fromRGB(255, 255, 255) or C_TEXT_M
-    MbStroke2.Color = (State.PlantMode == "RandomFarm") and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(45, 55, 80)
 end
 
 ModeBtn1.MouseButton1Click:Connect(function() State.PlantMode = "UnderPlayer" updateModeButtons() end)
@@ -1494,81 +1602,7 @@ HrLabel.TextXAlignment = Enum.TextXAlignment.Left
 local HrSwitch = createPillSwitch(HarRow, State.AutoHarvest, function(v) State.AutoHarvest = v end)
 HrSwitch.Position = UDim2.new(1, -40, 0.5, -10)
 
-local SeedHeaderRow = Instance.new("Frame", FarmCard1)
-SeedHeaderRow.Position = UDim2.new(0, 12, 0, 150)
-SeedHeaderRow.Size = UDim2.new(1, -24, 0, 24)
-SeedHeaderRow.BackgroundTransparency = 1
-
-local SeedSelectTitle = Instance.new("TextLabel", SeedHeaderRow)
-SeedSelectTitle.Size = UDim2.new(0.55, 0, 1, 0)
-SeedSelectTitle.BackgroundTransparency = 1
-SeedSelectTitle.Text = "Pilih Benih dari Inventory (Klik):"
-SeedSelectTitle.TextColor3 = C_CYAN
-SeedSelectTitle.Font = Enum.Font.GothamBold
-SeedSelectTitle.TextSize = 9.5
-SeedSelectTitle.TextXAlignment = Enum.TextXAlignment.Left
-
-local SearchBox = Instance.new("TextBox", SeedHeaderRow)
-SearchBox.Position = UDim2.new(0.55, 5, 0, 0)
-SearchBox.Size = UDim2.new(0.45, -5, 1, 0)
-SearchBox.BackgroundColor3 = C_CARD_2
-SearchBox.PlaceholderText = "🔍 Search seed..."
-SearchBox.PlaceholderColor3 = C_TEXT_M
-SearchBox.Text = ""
-SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-SearchBox.Font = Enum.Font.GothamMedium
-SearchBox.TextSize = 9
-Instance.new("UICorner", SearchBox).CornerRadius = UDim.new(0, 6)
-local SbStroke = Instance.new("UIStroke", SearchBox)
-SbStroke.Color = Color3.fromRGB(60, 70, 100)
-
-local SeedScroll = Instance.new("ScrollingFrame", FarmCard1)
-SeedScroll.Position = UDim2.new(0, 12, 0, 178)
-SeedScroll.Size = UDim2.new(1, -24, 0, 78)
-SeedScroll.BackgroundColor3 = C_CARD_2
-SeedScroll.ScrollBarThickness = 3
-SeedScroll.ScrollBarImageColor3 = C_PURPLE
-Instance.new("UICorner", SeedScroll).CornerRadius = UDim.new(0, 6)
-
-local SclLayout = Instance.new("UIListLayout", SeedScroll)
-SclLayout.FillDirection = Enum.FillDirection.Horizontal
-SclLayout.Padding = UDim.new(0, 6)
-local SclPad = Instance.new("UIPadding", SeedScroll)
-SclPad.PaddingTop = UDim.new(0, 8)
-SclPad.PaddingLeft = UDim.new(0, 8)
-SclPad.PaddingRight = UDim.new(0, 8)
-
--- Auto Harvest Worker
-task.spawn(function()
-    while true do
-        if State.AutoHarvest then
-            local farm = GetFarm()
-            local imp = farm and farm:FindFirstChild("Important")
-            local plantsPhysical = imp and imp:FindFirstChild("Plants_Physical")
-            if plantsPhysical then
-                local readyPrompts = {}
-                for _, plant in ipairs(plantsPhysical:GetChildren()) do
-                    if not State.AutoHarvest then break end
-                    local prompt = plant:FindFirstChildWhichIsA("ProximityPrompt", true)
-                    if prompt and prompt.Enabled then table.insert(readyPrompts, prompt) end
-                end
-
-                for _, prompt in ipairs(readyPrompts) do
-                    if not State.AutoHarvest then break end
-                    if prompt and prompt.Parent and prompt.Enabled then
-                        prompt.HoldDuration = 0
-                        prompt.RequiresLineOfSight = false
-                        pcall(function() fireproximityprompt(prompt) end)
-                        task.wait(0.015)
-                    end
-                end
-            end
-        end
-        task.wait(0.15)
-    end
-end)
-
--- Quick Helpers
+-- Movement & Utilities
 RunService.Stepped:Connect(function()
     if State.Noclip and LocalPlayer.Character then
         for _, p in ipairs(LocalPlayer.Character:GetDescendants()) do
@@ -1591,10 +1625,15 @@ LocalPlayer.Idled:Connect(function()
     end
 end)
 
--- Set Default Active Tab
+-- Buka Halaman Pets Secara Default
 Buttons["Pets"].BackgroundTransparency = 0
 Buttons["Pets"].BackgroundColor3 = C_PURPLE
 Buttons["Pets"].TextColor3 = Color3.fromRGB(255, 255, 255)
 PagePets.Visible = true
 
-print("[ZyloHub v3.5] Advanced Auto Hatch & Team Engine Loaded!")
+print("=========================================================")
+print("  🚀 ZYLOHUB v3.5 GAG2 EDITION RESMI AKTIF & TERHUBUNG!  ")
+print("  • Remote Hatch: PetEggService (HatchPet)                ")
+print("  • Remote Swap:  PetsService (SwapPetLoadout 1-4)        ")
+print("  • Remote Sell:  Native Trigger (SellAll.SENSOR)         ")
+print("=========================================================")

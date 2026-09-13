@@ -51,7 +51,6 @@ end)
 
 local State = {
     AutoPlant = false,
-    PlantMode = "UnderPlayer",
     AutoHarvest = false,
     AutoSell = false,
     SelectedSeed = "",
@@ -704,26 +703,34 @@ task.spawn(function()
     end
 end)
 
-RunService.Stepped:Connect(function()
-    if State.Noclip and LocalPlayer.Character then
-        for _, p in ipairs(LocalPlayer.Character:GetDescendants()) do
-            if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
+pcall(function()
+    RunService.Stepped:Connect(function()
+        if State.Noclip and LocalPlayer.Character then
+            for _, p in ipairs(LocalPlayer.Character:GetDescendants()) do
+                if p:IsA("BasePart") and p.CanCollide then p.CanCollide = false end
+            end
         end
-    end
+    end)
 end)
 
-UserInputService.JumpRequest:Connect(function()
-    if State.InfJump and LocalPlayer.Character then
-        local h = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
-    end
+pcall(function()
+    UserInputService.JumpRequest:Connect(function()
+        if State.InfJump and LocalPlayer.Character then
+            local h = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+        end
+    end)
 end)
 
-LocalPlayer.Idled:Connect(function()
-    if State.AntiAfk then
-        VirtualUser:CaptureController()
-        VirtualUser:ClickButton2(Vector2.new())
-    end
+pcall(function()
+    LocalPlayer.Idled:Connect(function()
+        if State.AntiAfk then
+            pcall(function()
+                VirtualUser:CaptureController()
+                VirtualUser:ClickButton2(Vector2.new())
+            end)
+        end
+    end)
 end)
 
 -- =============================================================
@@ -762,46 +769,98 @@ ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder = 999999
 ScreenGui.IgnoreGuiInset = true
 
--- Universal Safe Mount: Prioritaskan PlayerGui (100% render di Mobile & PC)
-local targetParent = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 10)
-if not targetParent and gethui then
+-- Universal Safe Mount dengan multi-fallback terproteksi
+local targetParent = nil
+if gethui then
     pcall(function() targetParent = gethui() end)
 end
 if not targetParent then
-    targetParent = CoreGui
+    pcall(function()
+        targetParent = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
+    end)
+end
+if not targetParent then
+    pcall(function() targetParent = CoreGui end)
 end
 
-if syn and syn.protect_gui then
-    pcall(function() syn.protect_gui(ScreenGui) end)
-end
-
-ScreenGui.Parent = targetParent
-
--- Notifikasi konfirmasi langsung saat GUI siap
 pcall(function()
-    game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "ZyloHub v3.5",
-        Text = "Official Edition Loaded! Tombol Z aktif di layar.",
-        Duration = 5
-    })
+    ScreenGui.Parent = targetParent
 end)
+if not ScreenGui.Parent then
+    pcall(function()
+        ScreenGui.Parent = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
+    end)
+end
 
+-- Custom In-Game Toast Banner (Dijamin muncul di Mobile tanpa bug StarterGui)
+local function showZyloToast(title, subtitle, color)
+    pcall(function()
+        local toast = Instance.new("Frame", ScreenGui)
+        toast.Name = "ZyloToast"
+        toast.Size = UDim2.new(0, 260, 0, 44)
+        toast.Position = UDim2.new(0.5, -130, 0, 18)
+        toast.BackgroundColor3 = Color3.fromRGB(15, 12, 32)
+        toast.ZIndex = 2000000
+        Instance.new("UICorner", toast).CornerRadius = UDim.new(0, 10)
+        local st = Instance.new("UIStroke", toast)
+        st.Color = color or Color3.fromRGB(138, 43, 226)
+        st.Thickness = 1.8
+
+        local tTitle = Instance.new("TextLabel", toast)
+        tTitle.Position = UDim2.new(0, 12, 0, 4)
+        tTitle.Size = UDim2.new(1, -24, 0, 18)
+        tTitle.BackgroundTransparency = 1
+        tTitle.Text = title
+        tTitle.TextColor3 = color or Color3.fromRGB(220, 130, 255)
+        tTitle.Font = Enum.Font.GothamBold
+        tTitle.TextSize = 12
+        tTitle.TextXAlignment = Enum.TextXAlignment.Left
+        tTitle.ZIndex = 2000001
+
+        local tSub = Instance.new("TextLabel", toast)
+        tSub.Position = UDim2.new(0, 12, 0, 22)
+        tSub.Size = UDim2.new(1, -24, 0, 16)
+        tSub.BackgroundTransparency = 1
+        tSub.Text = subtitle
+        tSub.TextColor3 = Color3.fromRGB(200, 205, 230)
+        tSub.Font = Enum.Font.GothamMedium
+        tSub.TextSize = 10
+        tSub.TextXAlignment = Enum.TextXAlignment.Left
+        tSub.ZIndex = 2000001
+
+        task.delay(5, function()
+            pcall(function()
+                for i = 0, 1, 0.1 do
+                    toast.BackgroundTransparency = i
+                    tTitle.TextTransparency = i
+                    tSub.TextTransparency = i
+                    st.Transparency = i
+                    task.wait(0.02)
+                end
+                toast:Destroy()
+            end)
+        end)
+    end)
+end
+showZyloToast("ZyloHub v3.5", "Berhasil dimuat! Klik tombol Z untuk buka.", Color3.fromRGB(0, 255, 180))
+
+-- Tombol Floating "Z" (Diposisikan di kiri atas agar TIDAK tertutup jempol/joystick HP)
 local FloatBtn = Instance.new("TextButton", ScreenGui)
 FloatBtn.Name = "ZyloFloatToggle"
-FloatBtn.Size = UDim2.new(0, 42, 0, 42)
-FloatBtn.Position = UDim2.new(0, 20, 0.5, -21)
+FloatBtn.Size = UDim2.new(0, 46, 0, 46)
+FloatBtn.Position = UDim2.new(0, 18, 0.18, 0)
 FloatBtn.BackgroundColor3 = Color3.fromRGB(18, 14, 38)
 FloatBtn.Text = "Z"
 FloatBtn.TextColor3 = Color3.fromRGB(220, 130, 255)
 FloatBtn.Font = Enum.Font.FredokaOne
-FloatBtn.TextSize = 22
+FloatBtn.TextSize = 24
 FloatBtn.AutoButtonColor = false
 FloatBtn.Active = true
-FloatBtn.ZIndex = 1000
-Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(0, 12)
+FloatBtn.ZIndex = 1500000
+Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(0, 14)
 local FbStroke = Instance.new("UIStroke", FloatBtn)
 FbStroke.Color = C_PURPLE
-FbStroke.Thickness = 2
+FbStroke.Thickness = 2.2
 
 local fbDragging, fbDragStart, fbStartPos
 FloatBtn.InputBegan:Connect(function(input)
@@ -823,16 +882,37 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
+-- Main Window (Menggunakan AnchorPoint + Auto UIScale agar pas di layar HP & PC)
 local Main = Instance.new("Frame")
 Main.Name = "MainWindow"
+Main.AnchorPoint = Vector2.new(0.5, 0.5)
 Main.Size = UDim2.new(0, 620, 0, 400)
-Main.Position = UDim2.new(0.5, -310, 0.5, -200)
+Main.Position = UDim2.new(0.5, 0, 0.5, 0)
 Main.BackgroundColor3 = C_BG
 Main.BorderSizePixel = 0
 Main.ClipsDescendants = true
 Main.Active = true
 Main.ZIndex = 900
 Main.Parent = ScreenGui
+
+-- Auto Scaling untuk Layar Ponsel Mobile
+local mainScale = Instance.new("UIScale", Main)
+local function adjustMobileScale()
+    pcall(function()
+        local cam = workspace.CurrentCamera
+        if cam and cam.ViewportSize.Y > 0 then
+            local vh = cam.ViewportSize.Y
+            local vw = cam.ViewportSize.X
+            local scaleY = math.min(1, (vh - 20) / 410)
+            local scaleX = math.min(1, (vw - 20) / 630)
+            mainScale.Scale = math.clamp(math.min(scaleX, scaleY), 0.55, 1)
+        end
+    end)
+end
+adjustMobileScale()
+if workspace.CurrentCamera then
+    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(adjustMobileScale)
+end
 
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 14)
 local MainBorder = Instance.new("UIStroke", Main)

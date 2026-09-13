@@ -16,17 +16,17 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
 -- =========================================================================
--- [1] SERVICES & REMOTES RESMI DARI DECOMPILE
+-- [1] SERVICES & REMOTES RESMI DARI DECOMPILE (NON-BLOCKING)
 -- =========================================================================
-local GameEvents = ReplicatedStorage:WaitForChild("GameEvents", 10)
-local Plant_RE = GameEvents and GameEvents:WaitForChild("Plant_RE", 5)
-local Sell_Inventory = GameEvents and GameEvents:WaitForChild("Sell_Inventory", 5)
-local BuySeedStock = GameEvents and GameEvents:WaitForChild("BuySeedStock", 5)
+local GameEvents = ReplicatedStorage:FindFirstChild("GameEvents") or ReplicatedStorage:WaitForChild("GameEvents", 4)
+local Plant_RE = GameEvents and (GameEvents:FindFirstChild("Plant_RE") or GameEvents:WaitForChild("Plant_RE", 2))
+local Sell_Inventory = GameEvents and (GameEvents:FindFirstChild("Sell_Inventory") or GameEvents:WaitForChild("Sell_Inventory", 2))
+local BuySeedStock = GameEvents and (GameEvents:FindFirstChild("BuySeedStock") or GameEvents:WaitForChild("BuySeedStock", 2))
 
 -- INI DIA REMOTE RESMI PENEMPATAN TELUR YANG DITEMUKAN DARI DECOMPILE!
-local PetEggService = GameEvents and GameEvents:WaitForChild("PetEggService", 5)
+local PetEggService = GameEvents and (GameEvents:FindFirstChild("PetEggService") or GameEvents:WaitForChild("PetEggService", 2))
 
-local Farms = workspace:WaitForChild("Farm", 10)
+local Farms = workspace:FindFirstChild("Farm") or workspace:WaitForChild("Farm", 3)
 
 local State = {
     AutoPlant = false,
@@ -704,17 +704,49 @@ local C_TEXT_W   = Color3.fromRGB(245, 247, 255)
 local C_TEXT_M   = Color3.fromRGB(145, 155, 185)
 
 local CoreGui = game:GetService("CoreGui")
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ZyloHub_v3_5_PetEggService"
-ScreenGui.ResetOnSpawn = false
+local GUI_NAME = "ZyloHub_v3_5_PetEggService"
 
+-- Bersihkan instance GUI lama jika ada agar tidak tumpuk atau tertimpa
+pcall(function()
+    if CoreGui:FindFirstChild(GUI_NAME) then
+        CoreGui[GUI_NAME]:Destroy()
+    end
+end)
+pcall(function()
+    if LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui") and LocalPlayer.PlayerGui:FindFirstChild(GUI_NAME) then
+        LocalPlayer.PlayerGui[GUI_NAME]:Destroy()
+    end
+end)
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = GUI_NAME
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+local parented = false
 if syn and syn.protect_gui then
-    syn.protect_gui(ScreenGui)
-    ScreenGui.Parent = CoreGui
-elseif gethui then
-    ScreenGui.Parent = gethui()
-else
-    ScreenGui.Parent = CoreGui
+    pcall(function()
+        syn.protect_gui(ScreenGui)
+        ScreenGui.Parent = CoreGui
+        parented = true
+    end)
+end
+if not parented and gethui then
+    pcall(function()
+        ScreenGui.Parent = gethui()
+        parented = true
+    end)
+end
+if not parented then
+    pcall(function()
+        ScreenGui.Parent = CoreGui
+        parented = true
+    end)
+end
+if not parented or not ScreenGui.Parent then
+    pcall(function()
+        ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5)
+    end)
 end
 
 local FloatBtn = Instance.new("TextButton", ScreenGui)

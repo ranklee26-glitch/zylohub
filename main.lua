@@ -16,7 +16,7 @@ local VirtualUser = game:GetService("VirtualUser")
 local LocalPlayer = Players.LocalPlayer
 
 -- =========================================================================
--- [1] SERVICES & REMOTES RESMI DARI DECOMPILE (NON-BLOCKING)
+-- [1] SERVICES & REMOTES RESMI DARI DECOMPILE
 -- =========================================================================
 local GameEvents = ReplicatedStorage:FindFirstChild("GameEvents") or ReplicatedStorage:WaitForChild("GameEvents", 4)
 local Plant_RE = GameEvents and (GameEvents:FindFirstChild("Plant_RE") or GameEvents:WaitForChild("Plant_RE", 2))
@@ -75,7 +75,7 @@ local State = {
 -- =========================================================================
 -- [2] PENDETEKSI KEBUN & Can_Plant RESMI
 -- =========================================================================
-local function GetFarm(): Folder?
+local function GetFarm()
     if not Farms then return nil end
     for _, farm in ipairs(Farms:GetChildren()) do
         local imp = farm:FindFirstChild("Important")
@@ -88,7 +88,7 @@ local function GetFarm(): Folder?
     return nil
 end
 
-local function GetCanPlantParts(): table
+local function GetCanPlantParts()
     local parts = {}
     local farm = GetFarm()
     if not farm then return parts end
@@ -110,7 +110,7 @@ end
 -- =========================================================================
 -- [3] ALGORITMA 13 TITIK TELUR (100% PRESET DI DALAM Can_Plant)
 -- =========================================================================
-local function Generate13EggPositions(mode: string): table
+local function Generate13EggPositions(mode)
     local positions = {}
     local canPlants = GetCanPlantParts()
     if #canPlants == 0 then return positions end
@@ -166,7 +166,7 @@ end
 -- =========================================================================
 -- [4] SCANNER TELUR DI Objects_Physical
 -- =========================================================================
-local function GetPlacedEggsInFarm(): table
+local function GetPlacedEggsInFarm()
     local placed = {}
     local farm = GetFarm()
     if not farm then return placed end
@@ -207,7 +207,7 @@ local BLACKLISTED_KEYWORDS = {
     "sword", "hammer", "pickaxe"
 }
 
-local function isPureSeed(tool: Tool): boolean
+local function isPureSeed(tool)
     if not tool:IsA("Tool") then return false end
     if tool:FindFirstChild("Item_String") then return false end
     if tool:FindFirstChild("EggData") or tool:FindFirstChild("PetData") then return false end
@@ -222,7 +222,7 @@ local function isPureSeed(tool: Tool): boolean
     return true
 end
 
-local function GetSeedInfo(tool: Tool)
+local function GetSeedInfo(tool)
     if not isPureSeed(tool) then return nil end
     local plantNameVal = tool:FindFirstChild("Plant_Name")
     local numbersVal = tool:FindFirstChild("Numbers")
@@ -250,7 +250,7 @@ local function GetSeedInfo(tool: Tool)
     return cleanName, count
 end
 
-local function GetOwnedSeeds(): table
+local function GetOwnedSeeds()
     local seeds = {}
     local function scan(parent)
         if not parent then return end
@@ -268,7 +268,7 @@ local function GetOwnedSeeds(): table
     return seeds
 end
 
-local function isPureEgg(tool: Tool): boolean
+local function isPureEgg(tool)
     if not tool:IsA("Tool") then return false end
     local nameLower = tool.Name:lower()
     if nameLower:find("seed") then return false end
@@ -279,7 +279,7 @@ local function isPureEgg(tool: Tool): boolean
     return tool:FindFirstChild("PetEggToolLocal") or tool:FindFirstChild("EggData") or nameLower:find("egg")
 end
 
-local function cleanEggTitle(rawName: string): string
+local function cleanEggTitle(rawName)
     return rawName:gsub("%[.-%]", ""):gsub("%s*[xX]%d+$", ""):gsub("^%s*(.-)%s*$", "%1")
 end
 
@@ -297,7 +297,7 @@ local function GetPureEggsInBackpack()
     return eggs
 end
 
-local function EquipCheck(Tool: Tool)
+local function EquipCheck(Tool)
     local Character = LocalPlayer.Character
     if not Character then return end
     local Humanoid = Character:FindFirstChildOfClass("Humanoid")
@@ -312,7 +312,7 @@ end
 -- =========================================================================
 -- [5.5] PET TEAM SCANNER & EQUIPPER (ADAPTASI DARI PET TEAM MANAGER)
 -- =========================================================================
-local function isPetTool(tool: Tool): boolean
+local function isPetTool(tool)
     if not tool:IsA("Tool") then return false end
     if tool:FindFirstChild("Item_String") then return false end
     if isPureSeed(tool) then return false end
@@ -324,7 +324,7 @@ local function isPetTool(tool: Tool): boolean
     return true
 end
 
-local function GetPetDetails(tool: Tool): table
+local function GetPetDetails(tool)
     local rawName = tool.Name:gsub("%[.-%]", ""):gsub("^%s*(.-)%s*$", "%1")
     local cleanName = rawName:gsub("%s*[xX]%d+$", ""):gsub("%s*|.*$", ""):gsub("^%s*(.-)%s*$", "%1")
     if cleanName == "" then cleanName = tool.Name end
@@ -366,7 +366,7 @@ local function GetPetDetails(tool: Tool): table
     }
 end
 
-local function GetOwnedPets(): table
+local function GetOwnedPets()
     local list = {}
     local bp = LocalPlayer:FindFirstChild("Backpack")
     local ch = LocalPlayer.Character
@@ -385,7 +385,7 @@ local function GetOwnedPets(): table
 end
 
 local isSwitchingPet = false
-local function EquipPetTeam(teamName: string)
+local function EquipPetTeam(teamName)
     if isSwitchingPet then return end
     local targetList = State.PetTeam.Teams[teamName]
     if not targetList or #targetList == 0 then return end
@@ -424,9 +424,9 @@ local function EquipPetTeam(teamName: string)
     isSwitchingPet = false
 end
 
--- =============================================================
+-- =========================================================================
 -- [6] LOOP WORKER AUTO PLACE EGG (MENGGUNAKAN PetEggService RESMI)
--- =============================================================
+-- =========================================================================
 local isPlacingEgg = false
 
 task.spawn(function()
@@ -522,7 +522,15 @@ task.spawn(function()
                         if not State.AutoHatch then break end
                         if prompt and prompt.Parent and prompt.Enabled then
                             prompt.HoldDuration = 0
-                            pcall(function() fireproximityprompt(prompt) end)
+                            pcall(function()
+                                if fireproximityprompt then
+                                    fireproximityprompt(prompt)
+                                elseif prompt.InputHoldBegin then
+                                    prompt:InputHoldBegin()
+                                    task.wait(0.1)
+                                    prompt:InputHoldEnd()
+                                end
+                            end)
                             task.wait(0.1)
                         end
                     end
@@ -600,7 +608,15 @@ task.spawn(function()
                     if prompt and prompt.Parent and prompt.Enabled then
                         prompt.HoldDuration = 0
                         prompt.RequiresLineOfSight = false
-                        pcall(function() fireproximityprompt(prompt) end)
+                        pcall(function()
+                            if fireproximityprompt then
+                                fireproximityprompt(prompt)
+                            elseif prompt.InputHoldBegin then
+                                prompt:InputHoldBegin()
+                                task.wait(0.015)
+                                prompt:InputHoldEnd()
+                            end
+                        end)
                         task.wait(0.015)
                     end
                 end
@@ -1081,9 +1097,7 @@ local function createPillSwitch(parent, defaultState, callback)
         callback(active)
     end)
     return switch
-end
-
--- =============================================================
+end-- =============================================================
 -- [TAB 3: PETS PAGE - ACCORDION SYSTEM & AUTO PLACE EGG]
 -- =============================================================
 PagePets.CanvasSize = UDim2.new(0, 0, 0, 950)
@@ -2082,6 +2096,100 @@ ManualSellBtn.MouseButton1Click:Connect(function()
     SellInventory()
 end)
 
+-- =============================================================
+-- [TAB 4: UTILITY PAGE]
+-- =============================================================
+PageUtility.CanvasSize = UDim2.new(0, 0, 0, 240)
+
+local UtilCard = Instance.new("Frame", PageUtility)
+UtilCard.Size = UDim2.new(1, 0, 0, 220)
+UtilCard.BackgroundColor3 = C_CARD
+Instance.new("UICorner", UtilCard).CornerRadius = UDim.new(0, 10)
+Instance.new("UIStroke", UtilCard).Color = C_STROKE
+
+local UcTitle = Instance.new("TextLabel", UtilCard)
+UcTitle.Position = UDim2.new(0, 12, 0, 10)
+UcTitle.Size = UDim2.new(1, -24, 0, 14)
+UcTitle.BackgroundTransparency = 1
+UcTitle.Text = "⚡  PLAYER UTILITY & MOBILITY"
+UcTitle.TextColor3 = C_PURPLE_L
+UcTitle.Font = Enum.Font.GothamBold
+UcTitle.TextSize = 11
+UcTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local function addUtilToggle(posY, text, defaultState, callback)
+    local row = Instance.new("Frame", UtilCard)
+    row.Position = UDim2.new(0, 12, 0, posY)
+    row.Size = UDim2.new(1, -24, 0, 30)
+    row.BackgroundColor3 = C_CARD_2
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Position = UDim2.new(0, 10, 0, 0)
+    lbl.Size = UDim2.new(1, -50, 1, 0)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = C_TEXT_W
+    lbl.Font = Enum.Font.GothamMedium
+    lbl.TextSize = 9.5
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local sw = createPillSwitch(row, defaultState, callback)
+    sw.Position = UDim2.new(1, -40, 0.5, -10)
+    return row
+end
+
+addUtilToggle(34, "Infinite Jump (Lompat Tanpa Batas di Udara)", State.InfJump, function(v) State.InfJump = v end)
+addUtilToggle(70, "Noclip (Tembus Dinding & Pagar Kebun)", State.Noclip, function(v) State.Noclip = v end)
+addUtilToggle(106, "Anti-AFK 20 Menit (Auto Disconnect Prevention)", State.AntiAfk, function(v) State.AntiAfk = v end)
+
+local WsRow = Instance.new("Frame", UtilCard)
+WsRow.Position = UDim2.new(0, 12, 0, 142)
+WsRow.Size = UDim2.new(1, -24, 0, 32)
+WsRow.BackgroundColor3 = C_CARD_2
+Instance.new("UICorner", WsRow).CornerRadius = UDim.new(0, 6)
+
+local WsLbl = Instance.new("TextLabel", WsRow)
+WsLbl.Position = UDim2.new(0, 10, 0, 0)
+WsLbl.Size = UDim2.new(0.6, 0, 1, 0)
+WsLbl.BackgroundTransparency = 1
+WsLbl.Text = "WalkSpeed Boost (Lari Cepat 42 Studs)"
+WsLbl.TextColor3 = C_TEXT_W
+WsLbl.Font = Enum.Font.GothamMedium
+WsLbl.TextSize = 9.5
+WsLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+local WsSw = createPillSwitch(WsRow, State.Walkspeed, function(v)
+    State.Walkspeed = v
+    if not v and LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+        LocalPlayer.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = 16
+    end
+end)
+WsSw.Position = UDim2.new(1, -40, 0.5, -10)
+
+RunService.RenderStepped:Connect(function()
+    if State.Walkspeed and LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then
+        LocalPlayer.Character:FindFirstChildOfClass("Humanoid").WalkSpeed = State.SpeedVal
+    end
+end)
+
+local RejoinBtn = Instance.new("TextButton", UtilCard)
+RejoinBtn.Position = UDim2.new(0, 12, 0, 180)
+RejoinBtn.Size = UDim2.new(1, -24, 0, 28)
+RejoinBtn.BackgroundColor3 = Color3.fromRGB(28, 22, 48)
+RejoinBtn.Text = "🔄 Rejoin Server Saat Ini"
+RejoinBtn.TextColor3 = C_PURPLE_L
+RejoinBtn.Font = Enum.Font.GothamBold
+RejoinBtn.TextSize = 9.5
+Instance.new("UICorner", RejoinBtn).CornerRadius = UDim.new(0, 6)
+local RjStroke = Instance.new("UIStroke", RejoinBtn)
+RjStroke.Color = C_PURPLE
+
+RejoinBtn.MouseButton1Click:Connect(function()
+    game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+end)
+
+-- Default Tab Active: Pets
 Buttons["Pets"].BackgroundTransparency = 0
 Buttons["Pets"].BackgroundColor3 = C_PURPLE
 Buttons["Pets"].TextColor3 = Color3.fromRGB(255, 255, 255)

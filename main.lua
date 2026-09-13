@@ -13,7 +13,13 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
-local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
+local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    repeat
+        task.wait()
+        LocalPlayer = Players.LocalPlayer
+    until LocalPlayer
+end
 
 -- =========================================================================
 -- [1] SERVICES & REMOTES RESMI DARI DECOMPILE
@@ -756,33 +762,29 @@ ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder = 999999
 ScreenGui.IgnoreGuiInset = true
 
--- Universal Safe Mount: Prioritaskan gethui() dan PlayerGui (100% tampil di Mobile/PC)
-local targetParent = nil
-if gethui then
-    pcall(function()
-        local h = gethui()
-        if h then targetParent = h end
-    end)
+-- Universal Safe Mount: Prioritaskan PlayerGui (100% render di Mobile & PC)
+local targetParent = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 10)
+if not targetParent and gethui then
+    pcall(function() targetParent = gethui() end)
 end
-
-if not targetParent and syn and syn.protect_gui then
-    pcall(function()
-        syn.protect_gui(ScreenGui)
-        targetParent = CoreGui
-    end)
-end
-
 if not targetParent then
-    pcall(function()
-        targetParent = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
-    end)
+    targetParent = CoreGui
 end
 
-if not targetParent then
-    pcall(function() targetParent = CoreGui end)
+if syn and syn.protect_gui then
+    pcall(function() syn.protect_gui(ScreenGui) end)
 end
 
 ScreenGui.Parent = targetParent
+
+-- Notifikasi konfirmasi langsung saat GUI siap
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "ZyloHub v3.5",
+        Text = "Official Edition Loaded! Tombol Z aktif di layar.",
+        Duration = 5
+    })
+end)
 
 local FloatBtn = Instance.new("TextButton", ScreenGui)
 FloatBtn.Name = "ZyloFloatToggle"
@@ -839,6 +841,7 @@ MainBorder.Thickness = 1.5
 
 local function toggleUI() Main.Visible = not Main.Visible end
 FloatBtn.MouseButton1Click:Connect(toggleUI)
+FloatBtn.Activated:Connect(toggleUI)
 
 local Topbar = Instance.new("Frame", Main)
 Topbar.Size = UDim2.new(1, 0, 0, 46)
@@ -936,6 +939,7 @@ MinBtn.TextColor3 = C_TEXT_M
 MinBtn.Font = Enum.Font.GothamBold
 MinBtn.TextSize = 13
 MinBtn.MouseButton1Click:Connect(toggleUI)
+MinBtn.Activated:Connect(toggleUI)
 
 local CloseBtn = Instance.new("TextButton", Topbar)
 CloseBtn.Size = UDim2.new(0, 24, 0, 24)

@@ -13,20 +13,35 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
-local LocalPlayer = Players.LocalPlayer
+local LocalPlayer = Players.LocalPlayer or Players.PlayerAdded:Wait()
 
 -- =========================================================================
 -- [1] SERVICES & REMOTES RESMI DARI DECOMPILE
 -- =========================================================================
-local GameEvents = ReplicatedStorage:FindFirstChild("GameEvents") or ReplicatedStorage:WaitForChild("GameEvents", 4)
-local Plant_RE = GameEvents and (GameEvents:FindFirstChild("Plant_RE") or GameEvents:WaitForChild("Plant_RE", 2))
-local Sell_Inventory = GameEvents and (GameEvents:FindFirstChild("Sell_Inventory") or GameEvents:WaitForChild("Sell_Inventory", 2))
-local BuySeedStock = GameEvents and (GameEvents:FindFirstChild("BuySeedStock") or GameEvents:WaitForChild("BuySeedStock", 2))
+local GameEvents = ReplicatedStorage:FindFirstChild("GameEvents")
+local Plant_RE = GameEvents and GameEvents:FindFirstChild("Plant_RE")
+local Sell_Inventory = GameEvents and GameEvents:FindFirstChild("Sell_Inventory")
+local BuySeedStock = GameEvents and GameEvents:FindFirstChild("BuySeedStock")
 
 -- INI DIA REMOTE RESMI PENEMPATAN TELUR YANG DITEMUKAN DARI DECOMPILE!
-local PetEggService = GameEvents and (GameEvents:FindFirstChild("PetEggService") or GameEvents:WaitForChild("PetEggService", 2))
+local PetEggService = GameEvents and GameEvents:FindFirstChild("PetEggService")
+local Farms = workspace:FindFirstChild("Farm")
 
-local Farms = workspace:FindFirstChild("Farm") or workspace:WaitForChild("Farm", 3)
+-- Resolusi non-blocking di background agar GUI langsung tampil instan tanpa lag
+task.spawn(function()
+    if not GameEvents then
+        GameEvents = ReplicatedStorage:WaitForChild("GameEvents", 8)
+    end
+    if GameEvents then
+        if not Plant_RE then Plant_RE = GameEvents:FindFirstChild("Plant_RE") or GameEvents:WaitForChild("Plant_RE", 4) end
+        if not Sell_Inventory then Sell_Inventory = GameEvents:FindFirstChild("Sell_Inventory") or GameEvents:WaitForChild("Sell_Inventory", 4) end
+        if not BuySeedStock then BuySeedStock = GameEvents:FindFirstChild("BuySeedStock") or GameEvents:WaitForChild("BuySeedStock", 4) end
+        if not PetEggService then PetEggService = GameEvents:FindFirstChild("PetEggService") or GameEvents:WaitForChild("PetEggService", 4) end
+    end
+    if not Farms then
+        Farms = workspace:FindFirstChild("Farm") or workspace:WaitForChild("Farm", 8)
+    end
+end)
 
 local State = {
     AutoPlant = false,
@@ -738,32 +753,36 @@ local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = GUI_NAME
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder = 999999
+ScreenGui.IgnoreGuiInset = true
 
-local parented = false
-if syn and syn.protect_gui then
+-- Universal Safe Mount: Prioritaskan gethui() dan PlayerGui (100% tampil di Mobile/PC)
+local targetParent = nil
+if gethui then
+    pcall(function()
+        local h = gethui()
+        if h then targetParent = h end
+    end)
+end
+
+if not targetParent and syn and syn.protect_gui then
     pcall(function()
         syn.protect_gui(ScreenGui)
-        ScreenGui.Parent = CoreGui
-        parented = true
+        targetParent = CoreGui
     end)
 end
-if not parented and gethui then
+
+if not targetParent then
     pcall(function()
-        ScreenGui.Parent = gethui()
-        parented = true
+        targetParent = LocalPlayer:FindFirstChild("PlayerGui") or LocalPlayer:WaitForChild("PlayerGui", 5)
     end)
 end
-if not parented then
-    pcall(function()
-        ScreenGui.Parent = CoreGui
-        parented = true
-    end)
+
+if not targetParent then
+    pcall(function() targetParent = CoreGui end)
 end
-if not parented or not ScreenGui.Parent then
-    pcall(function()
-        ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui", 5)
-    end)
-end
+
+ScreenGui.Parent = targetParent
 
 local FloatBtn = Instance.new("TextButton", ScreenGui)
 FloatBtn.Name = "ZyloFloatToggle"
@@ -775,6 +794,8 @@ FloatBtn.TextColor3 = Color3.fromRGB(220, 130, 255)
 FloatBtn.Font = Enum.Font.FredokaOne
 FloatBtn.TextSize = 22
 FloatBtn.AutoButtonColor = false
+FloatBtn.Active = true
+FloatBtn.ZIndex = 1000
 Instance.new("UICorner", FloatBtn).CornerRadius = UDim.new(0, 12)
 local FbStroke = Instance.new("UIStroke", FloatBtn)
 FbStroke.Color = C_PURPLE
@@ -807,6 +828,8 @@ Main.Position = UDim2.new(0.5, -310, 0.5, -200)
 Main.BackgroundColor3 = C_BG
 Main.BorderSizePixel = 0
 Main.ClipsDescendants = true
+Main.Active = true
+Main.ZIndex = 900
 Main.Parent = ScreenGui
 
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 14)
@@ -859,7 +882,7 @@ local BrandSub = Instance.new("TextLabel", Topbar)
 BrandSub.Position = UDim2.new(0, 48, 0, 24)
 BrandSub.Size = UDim2.new(0, 180, 0, 14)
 BrandSub.BackgroundTransparency = 1
-BrandSub.Text = "Auto • Farm • Pets • More"
+BrandSub.Text = "Auto â€¢ Farm â€¢ Pets â€¢ More"
 BrandSub.TextColor3 = C_PURPLE_L
 BrandSub.Font = Enum.Font.GothamMedium
 BrandSub.TextSize = 9
@@ -908,7 +931,7 @@ local MinBtn = Instance.new("TextButton", Topbar)
 MinBtn.Size = UDim2.new(0, 24, 0, 24)
 MinBtn.Position = UDim2.new(1, -44, 0.5, -12)
 MinBtn.BackgroundTransparency = 1
-MinBtn.Text = "—"
+MinBtn.Text = "â€”"
 MinBtn.TextColor3 = C_TEXT_M
 MinBtn.Font = Enum.Font.GothamBold
 MinBtn.TextSize = 13
@@ -918,7 +941,7 @@ local CloseBtn = Instance.new("TextButton", Topbar)
 CloseBtn.Size = UDim2.new(0, 24, 0, 24)
 CloseBtn.Position = UDim2.new(1, -24, 0.5, -12)
 CloseBtn.BackgroundTransparency = 1
-CloseBtn.Text = "✕"
+CloseBtn.Text = "âœ•"
 CloseBtn.TextColor3 = C_TEXT_M
 CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.TextSize = 12
@@ -978,7 +1001,7 @@ local BcTitle = Instance.new("TextLabel", BrandCard)
 BcTitle.Position = UDim2.new(0, 10, 0, 12)
 BcTitle.Size = UDim2.new(1, -16, 0, 14)
 BcTitle.BackgroundTransparency = 1
-BcTitle.Text = "⚡ ZYLOHUB"
+BcTitle.Text = "âš¡ ZYLOHUB"
 BcTitle.TextColor3 = C_TEXT_W
 BcTitle.Font = Enum.Font.GothamBold
 BcTitle.TextSize = 11
@@ -1061,15 +1084,15 @@ local PageEvent     = createTabPage("Event")
 local PageInventory = createTabPage("Inventory")
 local PageWebhook   = createTabPage("Webhook")
 
-addSidebarTab("Home", "🏠", 1)
-addSidebarTab("Farm", "🍃", 2)
-addSidebarTab("Pets", "🐾", 3)
-addSidebarTab("Utility", "🔧", 4)
-addSidebarTab("Shop", "🛒", 5)
-addSidebarTab("Config", "⚙️", 6)
-addSidebarTab("Event", "⭐", 7)
-addSidebarTab("Inventory", "🎒", 8)
-addSidebarTab("Webhook", "🔗", 9)
+addSidebarTab("Home", "ðŸ ", 1)
+addSidebarTab("Farm", "ðŸƒ", 2)
+addSidebarTab("Pets", "ðŸ¾", 3)
+addSidebarTab("Utility", "ðŸ”§", 4)
+addSidebarTab("Shop", "ðŸ›’", 5)
+addSidebarTab("Config", "âš™ï¸", 6)
+addSidebarTab("Event", "â­", 7)
+addSidebarTab("Inventory", "ðŸŽ’", 8)
+addSidebarTab("Webhook", "ðŸ”—", 9)
 
 local function createPillSwitch(parent, defaultState, callback)
     local switch = Instance.new("TextButton", parent)
@@ -1467,7 +1490,7 @@ local teamCounterLbl = Instance.new("TextLabel", delayHeaderFrame)
 teamCounterLbl.Position = UDim2.new(0, 8, 0, 19)
 teamCounterLbl.Size = UDim2.new(1, -16, 0, 14)
 teamCounterLbl.BackgroundTransparency = 1
-teamCounterLbl.Text = "🪢 Main (0)   🦕 Bronto (0)   🥚 Hatch (0)   💰 Sell (0)"
+teamCounterLbl.Text = "ðŸª¢ Main (0)   ðŸ¦• Bronto (0)   ðŸ¥š Hatch (0)   ðŸ’° Sell (0)"
 teamCounterLbl.TextColor3 = Color3.fromRGB(180, 190, 215)
 teamCounterLbl.Font = Enum.Font.GothamMedium
 teamCounterLbl.TextSize = 8.5
@@ -1478,7 +1501,7 @@ local function updateCounters()
     local bC = State.PetTeam.Teams["Bronto Team"] and #State.PetTeam.Teams["Bronto Team"] or 0
     local hC = State.PetTeam.Teams["Hatch Team"] and #State.PetTeam.Teams["Hatch Team"] or 0
     local sC = State.PetTeam.Teams["Sell Team"] and #State.PetTeam.Teams["Sell Team"] or 0
-    teamCounterLbl.Text = string.format("🪢 Main (%d)   🦕 Bronto (%d)   🥚 Hatch (%d)   💰 Sell (%d)", mC, bC, hC, sC)
+    teamCounterLbl.Text = string.format("ðŸª¢ Main (%d)   ðŸ¦• Bronto (%d)   ðŸ¥š Hatch (%d)   ðŸ’° Sell (%d)", mC, bC, hC, sC)
 end
 
 -- Row 4: Delay Input Fields (Delay Equip & Delay Unequip)
@@ -1559,7 +1582,7 @@ local petSearchBox = Instance.new("TextBox", selectHeaderRow)
 petSearchBox.Position = UDim2.new(0.50, 4, 0, 0)
 petSearchBox.Size = UDim2.new(0.48, -4, 1, 0)
 petSearchBox.BackgroundColor3 = C_CARD_2
-petSearchBox.PlaceholderText = "🔍 Search..."
+petSearchBox.PlaceholderText = "ðŸ” Search..."
 petSearchBox.PlaceholderColor3 = C_TEXT_M
 petSearchBox.Text = ""
 petSearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1619,7 +1642,7 @@ refreshPetList = function()
             pIcon.Position = UDim2.new(0, 6, 0, 0)
             pIcon.Size = UDim2.new(0, 16, 1, 0)
             pIcon.BackgroundTransparency = 1
-            pIcon.Text = isSelected and "✓" or "🐾"
+            pIcon.Text = isSelected and "âœ“" or "ðŸ¾"
             pIcon.TextColor3 = isSelected and Color3.fromRGB(0, 255, 170) or C_TEXT_M
             pIcon.Font = Enum.Font.GothamBold
             pIcon.TextSize = 9
@@ -1714,7 +1737,7 @@ local startBtn = Instance.new("TextButton", actionRow)
 startBtn.Position = UDim2.new(0, 0, 0, 0)
 startBtn.Size = UDim2.new(0.24, -3, 1, 0)
 startBtn.BackgroundColor3 = State.PetTeam.Active and C_PURPLE or Color3.fromRGB(22, 28, 48)
-startBtn.Text = "⚡ START"
+startBtn.Text = "âš¡ START"
 startBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 startBtn.Font = Enum.Font.GothamBold
 startBtn.TextSize = 8.5
@@ -1738,7 +1761,7 @@ local statusLbl = Instance.new("TextLabel", actionRow)
 statusLbl.Position = UDim2.new(0.48, 6, 0, 0)
 statusLbl.Size = UDim2.new(0.52, -6, 1, 0)
 statusLbl.BackgroundTransparency = 1
-statusLbl.Text = State.PetTeam.Active and "● AUTO TEAM ACTIVE" or "○ STOPPED"
+statusLbl.Text = State.PetTeam.Active and "â— AUTO TEAM ACTIVE" or "â—‹ STOPPED"
 statusLbl.TextColor3 = State.PetTeam.Active and Color3.fromRGB(0, 255, 170) or C_TEXT_M
 statusLbl.Font = Enum.Font.GothamBold
 statusLbl.TextSize = 8
@@ -1747,7 +1770,7 @@ statusLbl.TextXAlignment = Enum.TextXAlignment.Left
 local function updateStartStopUI()
     startBtn.BackgroundColor3 = State.PetTeam.Active and C_PURPLE or Color3.fromRGB(22, 28, 48)
     stopBtn.BackgroundColor3 = (not State.PetTeam.Active) and Color3.fromRGB(38, 22, 32) or Color3.fromRGB(22, 28, 48)
-    statusLbl.Text = State.PetTeam.Active and "● AUTO TEAM ACTIVE" or "○ STOPPED"
+    statusLbl.Text = State.PetTeam.Active and "â— AUTO TEAM ACTIVE" or "â—‹ STOPPED"
     statusLbl.TextColor3 = State.PetTeam.Active and Color3.fromRGB(0, 255, 170) or C_TEXT_M
 end
 
@@ -1775,7 +1798,7 @@ local teamBtn1 = Instance.new("TextButton", bodyTeam)
 teamBtn1.Position = UDim2.new(0, 12, 0, 6)
 teamBtn1.Size = UDim2.new(0.46, 0, 0, 28)
 teamBtn1.BackgroundColor3 = C_PURPLE
-teamBtn1.Text = "⚡ Equip Best Team"
+teamBtn1.Text = "âš¡ Equip Best Team"
 teamBtn1.TextColor3 = Color3.fromRGB(255, 255, 255)
 teamBtn1.Font = Enum.Font.GothamBold
 teamBtn1.TextSize = 8.5
@@ -1785,7 +1808,7 @@ local teamBtn2 = Instance.new("TextButton", bodyTeam)
 teamBtn2.Position = UDim2.new(0.52, 0, 0, 6)
 teamBtn2.Size = UDim2.new(0.46, 0, 0, 28)
 teamBtn2.BackgroundColor3 = C_CARD_2
-teamBtn2.Text = "🔄 Unequip All"
+teamBtn2.Text = "ðŸ”„ Unequip All"
 teamBtn2.TextColor3 = C_TEXT_M
 teamBtn2.Font = Enum.Font.GothamBold
 teamBtn2.TextSize = 8.5
@@ -1812,7 +1835,7 @@ local FcTitle = Instance.new("TextLabel", FarmCard1)
 FcTitle.Position = UDim2.new(0, 12, 0, 10)
 FcTitle.Size = UDim2.new(1, -24, 0, 14)
 FcTitle.BackgroundTransparency = 1
-FcTitle.Text = "🌱  AUTO PLANT & HARVEST ENGINE"
+FcTitle.Text = "ðŸŒ±  AUTO PLANT & HARVEST ENGINE"
 FcTitle.TextColor3 = C_PURPLE_L
 FcTitle.Font = Enum.Font.GothamBold
 FcTitle.TextSize = 11
@@ -1824,10 +1847,10 @@ FarmDetect.Size = UDim2.new(1, -24, 0, 16)
 FarmDetect.BackgroundTransparency = 1
 local mFarm = GetFarm()
 if mFarm then
-    FarmDetect.Text = "✅ Lahan: " .. mFarm.Name .. " (Can_Plant Terhubung)"
+    FarmDetect.Text = "âœ… Lahan: " .. mFarm.Name .. " (Can_Plant Terhubung)"
     FarmDetect.TextColor3 = Color3.fromRGB(0, 255, 170)
 else
-    FarmDetect.Text = "⚠️ Lahan Belum Ditemukan di Workspace.Farm"
+    FarmDetect.Text = "âš ï¸ Lahan Belum Ditemukan di Workspace.Farm"
     FarmDetect.TextColor3 = Color3.fromRGB(255, 100, 100)
 end
 FarmDetect.Font = Enum.Font.GothamBold
@@ -1860,7 +1883,7 @@ ModeRow.BackgroundTransparency = 1
 local ModeBtn1 = Instance.new("TextButton", ModeRow)
 ModeBtn1.Size = UDim2.new(0.485, 0, 1, 0)
 ModeBtn1.BackgroundColor3 = (State.PlantMode == "UnderPlayer") and C_PURPLE or C_CARD_2
-ModeBtn1.Text = "📍 Di Bawah Karakter"
+ModeBtn1.Text = "ðŸ“ Di Bawah Karakter"
 ModeBtn1.TextColor3 = (State.PlantMode == "UnderPlayer") and Color3.fromRGB(255, 255, 255) or C_TEXT_M
 ModeBtn1.Font = Enum.Font.GothamBold
 ModeBtn1.TextSize = 9
@@ -1872,7 +1895,7 @@ local ModeBtn2 = Instance.new("TextButton", ModeRow)
 ModeBtn2.Position = UDim2.new(0.515, 0, 0, 0)
 ModeBtn2.Size = UDim2.new(0.485, 0, 1, 0)
 ModeBtn2.BackgroundColor3 = (State.PlantMode == "RandomFarm") and C_PURPLE or C_CARD_2
-ModeBtn2.Text = "🎲 Random di Kebun"
+ModeBtn2.Text = "ðŸŽ² Random di Kebun"
 ModeBtn2.TextColor3 = (State.PlantMode == "RandomFarm") and Color3.fromRGB(255, 255, 255) or C_TEXT_M
 ModeBtn2.Font = Enum.Font.GothamBold
 ModeBtn2.TextSize = 9
@@ -1929,7 +1952,7 @@ local SearchBox = Instance.new("TextBox", SeedHeaderRow)
 SearchBox.Position = UDim2.new(0.55, 5, 0, 0)
 SearchBox.Size = UDim2.new(0.45, -5, 1, 0)
 SearchBox.BackgroundColor3 = C_CARD_2
-SearchBox.PlaceholderText = "🔍 Search seed..."
+SearchBox.PlaceholderText = "ðŸ” Search seed..."
 SearchBox.PlaceholderColor3 = C_TEXT_M
 SearchBox.Text = ""
 SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -1982,7 +2005,7 @@ local function refreshSeedChips()
             icon.Position = UDim2.new(0, 6, 0, 8)
             icon.Size = UDim2.new(0, 16, 0, 16)
             icon.BackgroundTransparency = 1
-            icon.Text = "🌱"
+            icon.Text = "ðŸŒ±"
             icon.TextSize = 12
 
             local nameL = Instance.new("TextLabel", chip)
@@ -2038,7 +2061,7 @@ local RefSeedBtn = Instance.new("TextButton", FarmCard1)
 RefSeedBtn.Position = UDim2.new(0, 12, 0, 264)
 RefSeedBtn.Size = UDim2.new(1, -24, 0, 24)
 RefSeedBtn.BackgroundColor3 = Color3.fromRGB(22, 28, 44)
-RefSeedBtn.Text = "🔄 Refresh Inventaris Benih Sekarang"
+RefSeedBtn.Text = "ðŸ”„ Refresh Inventaris Benih Sekarang"
 RefSeedBtn.TextColor3 = C_CYAN
 RefSeedBtn.Font = Enum.Font.GothamBold
 RefSeedBtn.TextSize = 9
@@ -2055,7 +2078,7 @@ local SellTitle = Instance.new("TextLabel", FarmCard2)
 SellTitle.Position = UDim2.new(0, 12, 0, 10)
 SellTitle.Size = UDim2.new(1, -24, 0, 14)
 SellTitle.BackgroundTransparency = 1
-SellTitle.Text = "💰  AUTO SELL & MERCHANT ENGINE"
+SellTitle.Text = "ðŸ’°  AUTO SELL & MERCHANT ENGINE"
 SellTitle.TextColor3 = C_CYAN
 SellTitle.Font = Enum.Font.GothamBold
 SellTitle.TextSize = 11
@@ -2083,7 +2106,7 @@ local ManualSellBtn = Instance.new("TextButton", FarmCard2)
 ManualSellBtn.Position = UDim2.new(0, 12, 0, 74)
 ManualSellBtn.Size = UDim2.new(1, -24, 0, 34)
 ManualSellBtn.BackgroundColor3 = Color3.fromRGB(24, 32, 54)
-ManualSellBtn.Text = "⚡ Jual Semua Hasil Panen Sekarang (Teleport NPC & Balik)"
+ManualSellBtn.Text = "âš¡ Jual Semua Hasil Panen Sekarang (Teleport NPC & Balik)"
 ManualSellBtn.TextColor3 = C_CYAN
 ManualSellBtn.Font = Enum.Font.GothamBold
 ManualSellBtn.TextSize = 10
@@ -2111,7 +2134,7 @@ local UcTitle = Instance.new("TextLabel", UtilCard)
 UcTitle.Position = UDim2.new(0, 12, 0, 10)
 UcTitle.Size = UDim2.new(1, -24, 0, 14)
 UcTitle.BackgroundTransparency = 1
-UcTitle.Text = "⚡  PLAYER UTILITY & MOBILITY"
+UcTitle.Text = "âš¡  PLAYER UTILITY & MOBILITY"
 UcTitle.TextColor3 = C_PURPLE_L
 UcTitle.Font = Enum.Font.GothamBold
 UcTitle.TextSize = 11
@@ -2177,7 +2200,7 @@ local RejoinBtn = Instance.new("TextButton", UtilCard)
 RejoinBtn.Position = UDim2.new(0, 12, 0, 180)
 RejoinBtn.Size = UDim2.new(1, -24, 0, 28)
 RejoinBtn.BackgroundColor3 = Color3.fromRGB(28, 22, 48)
-RejoinBtn.Text = "🔄 Rejoin Server Saat Ini"
+RejoinBtn.Text = "ðŸ”„ Rejoin Server Saat Ini"
 RejoinBtn.TextColor3 = C_PURPLE_L
 RejoinBtn.Font = Enum.Font.GothamBold
 RejoinBtn.TextSize = 9.5
@@ -2196,3 +2219,12 @@ Buttons["Pets"].TextColor3 = Color3.fromRGB(255, 255, 255)
 PagePets.Visible = true
 
 print("[ZyloHub v3.5] Official PetEggService Edition Loaded & Verified!")
+
+-- Kirim Notifikasi Visual Berhasil Dimuat
+pcall(function()
+    game:GetService("StarterGui"):SetCore("SendNotification", {
+        Title = "ZyloHub v3.5",
+        Text = "Official PetEggService Edition loaded! Klik tombol Z untuk buka menu.",
+        Duration = 6
+    })
+end)

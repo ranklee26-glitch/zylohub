@@ -1,6 +1,7 @@
 local Games = {
-    -- Grow a Garden (Daftarkan semua varian ID-nya)
-    [126884695634066] = "https://raw.githubusercontent.com/ranklee26-glitch/zylohub/main/games/GrowAGarden.lua",
+    -- Grow a Garden (Diambil dari Repository zylo-games)
+    [7436755782] = "https://raw.githubusercontent.com/ranklee26-glitch/zylo-games/main/GrowAGarden.lua",
+    [126884695634066] = "https://raw.githubusercontent.com/ranklee26-glitch/zylo-games/main/GrowAGarden.lua",
 }
 
 return Games
